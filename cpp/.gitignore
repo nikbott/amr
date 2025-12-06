@@ -1,0 +1,5 @@
+mesh_2build/
+*.o
+*.svg
+__pycache__/svg
+speedup.svg
