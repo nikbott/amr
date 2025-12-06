@@ -12,24 +12,38 @@ class CircleOracle2D:
         self.min_depth = config.coarse_level
 
     def __call__(self, node, max_level_grid: int) -> bool:
+        # 1. Decode Position
         x, y = Morton2D.decode(node.code)
         size = 1 << (max_level_grid - node.level)
         
-        # Node Center
+        # 2. Node Center
         node_cx = x + size * 0.5
         node_cy = y + size * 0.5
         
-        # Distance from Grid Center to Node Center
-        dist = np.sqrt((node_cx - self.cx)**2 + (node_cy - self.cy)**2)
+        # 3. Squared Distance (Avoids sqrt)
+        dist_sq = (node_cx - self.cx)**2 + (node_cy - self.cy)**2
         
-        # [FIX] Box Intersection Logic
-        # Calculate the node's semi-diagonal (distance from center to corner)
-        # to check if ANY part of the node overlaps the refinement band.
-        # extent = size * sqrt(2) / 2 ≈ size * 0.7071
+        # 4. Determine Bounds
+        # extent = size * sqrt(2) / 2
         extent = size * 0.70710678
+        threshold = self.bandwidth + extent
+        
+        # We want: |dist - radius| < threshold
+        # Equivalent to: (radius - threshold)^2 < dist^2 < (radius + threshold)^2
+        # Note: Must handle negative lower bound case (dist is always >= 0)
+        
+        upper_bound = self.radius + threshold
+        upper_sq = upper_bound * upper_bound
+        
+        lower_bound = self.radius - threshold
+        # If lower_bound is negative, the condition dist > lower_bound is always true
+        lower_sq = 0.0 if lower_bound < 0 else lower_bound * lower_bound
+
+        # 5. Check
+        is_refining = (dist_sq < upper_sq) and (dist_sq > lower_sq)
         
         return (node.level < self.min_depth) or \
-               (abs(dist - self.radius) < (self.bandwidth + extent) and node.level < self.max_depth)
+               (is_refining and node.level < self.max_depth)
 
 class SphereOracle3D:
     def __init__(self, config: AMRConfig):
@@ -41,17 +55,31 @@ class SphereOracle3D:
         self.min_depth = config.coarse_level
 
     def __call__(self, node, max_level_grid: int) -> bool:
+        # 1. Decode Position
         x, y, z = Morton3D.decode(node.code)
         size = 1 << (max_level_grid - node.level)
         
+        # 2. Node Center
         node_cx = x + size * 0.5
         node_cy = y + size * 0.5
         node_cz = z + size * 0.5
         
-        dist = np.sqrt((node_cx - self.cx)**2 + (node_cy - self.cy)**2 + (node_cz - self.cz)**2)
+        # 3. Squared Distance
+        dist_sq = (node_cx - self.cx)**2 + (node_cy - self.cy)**2 + (node_cz - self.cz)**2
         
-        # [FIX] 3D Extent = size * sqrt(3) / 2 ≈ size * 0.8660
+        # 4. Determine Bounds
+        # 3D Extent = size * sqrt(3) / 2
         extent = size * 0.8660254
+        threshold = self.bandwidth + extent
+        
+        upper_bound = self.radius + threshold
+        upper_sq = upper_bound * upper_bound
+        
+        lower_bound = self.radius - threshold
+        lower_sq = 0.0 if lower_bound < 0 else lower_bound * lower_bound
+
+        # 5. Check
+        is_refining = (dist_sq < upper_sq) and (dist_sq > lower_sq)
         
         return (node.level < self.min_depth) or \
-               (abs(dist - self.radius) < (self.bandwidth + extent) and node.level < self.max_depth)
+               (is_refining and node.level < self.max_depth)
