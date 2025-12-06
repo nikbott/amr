@@ -96,6 +96,15 @@ int main(int argc, char** argv) {
     cfg.center = {0.5, 0.5};
     cfg.radius = 0.25;
 
+    // Parse configuration arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--max_level") == 0 && i + 1 < argc) {
+            cfg.max_level = std::atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--fine_level") == 0 && i + 1 < argc) {
+            cfg.fine_level = std::atoi(argv[++i]);
+        }
+    }
+
     std::cout << "Config: 2D Quadtree, MaxLvl=" << cfg.max_level << std::endl;
     std::cout << "Mode: " << (use_cuda ? "GPU" : "CPU") << std::endl;
 
