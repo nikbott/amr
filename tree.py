@@ -80,6 +80,7 @@ class AbstractLinearTree(ABC):
         """
         Enforce 2:1 Balance Constraint (Ripple Effect).
         Ensures no two adjacent cells differ by more than 1 refinement level.
+        Batches refinements per ripple pass to minimize sorting overhead.
         """
         max_iter = 20
         # Directions excluding (0,0,...)
@@ -89,41 +90,56 @@ class AbstractLinearTree(ABC):
             directions = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1) if not (dx==0 and dy==0 and dz==0)]
 
         for _ in range(max_iter):
-            # O(1) Lookup
+            # 1. Build Map O(N)
             node_map = {n.code: n for n in self.leaves}
             to_refine_codes = set()
-            found_imbalance = False
 
+            # 2. Scan all leaves for violations
             for node in self.leaves:
-                for direction in directions:
-                    # 1. Where would my neighbor be at my level?
-                    n_code = self._get_neighbor_code(node.code, node.level, direction)
-                    if n_code == -1: continue 
+                # We need to check if any neighbor is too coarse (level <= node.level - 2)
+                min_valid_level = node.level - 1
+                
+                # If we are already at level 0 or 1, we can't have a neighbor at -1 or -2
+                if min_valid_level < 1:
+                    continue
 
-                    # 2. Check if a neighbor exists at level <= node.level - 2 (Too Coarse)
-                    # We search "up" the tree from L-2 to 0
+                for direction in directions:
+                    # Get neighbor code at MY level first
+                    base_n_code = self._get_neighbor_code(node.code, node.level, direction)
+                    if base_n_code == -1: continue 
+
+                    # Search "up" the tree (coarser) starting from the violation threshold
+                    # We check levels: [node.level - 2, node.level - 3, ... 0]
                     curr_search_level = node.level - 2
+                    
                     while curr_search_level >= 0:
-                        coarse_n_code = self._get_neighbor_code(node.code, node.level, direction)
-                        
-                        # Apply bitmask to align to coarse grid
+                        # Calculate mask for this coarser level
                         shift = (self.max_level - curr_search_level) * self.ndim
                         mask = ~((1 << shift) - 1)
-                        coarse_n_code &= mask
                         
+                        # Align the base neighbor code to this coarser grid
+                        coarse_n_code = base_n_code & mask
+                        
+                        # If this neighbor is already marked, stop checking this direction
+                        if coarse_n_code in to_refine_codes:
+                            break
+
+                        # Check if this coarse neighbor exists in the tree
                         if coarse_n_code in node_map:
                             neighbor = node_map[coarse_n_code]
-                            # Confirm neighbor is actually at this coarse level
+                            # Confirm it is actually a leaf at this level (not just a prefix of a finer node)
                             if neighbor.level == curr_search_level:
                                 to_refine_codes.add(neighbor.code)
-                                found_imbalance = True
-                                break 
+                                break # Found the leaf, stop searching coarser levels
+                        
                         curr_search_level -= 1
 
-            if not found_imbalance:
+            # 3. Batch Refine
+            # If no violations found in this pass, we are balanced.
+            if not to_refine_codes:
                 break
 
-            # Force Refinement
+            # Apply refinement to all marked nodes at once
             self.refine(lambda n, ml: n.code in to_refine_codes)
 
 
