@@ -6,8 +6,7 @@
 class CircleOracle2D {
     AMRConfig config;
     uint64_t cx, cy;
-    uint64_t radius_sq;
-    uint64_t bandwidth;
+    double bandwidth;
     
 public:
     CircleOracle2D(const AMRConfig& cfg) : config(cfg) {
@@ -34,7 +33,7 @@ public:
         double extent = size * 0.70710678; // size * sqrt(2)/2
         double threshold = bandwidth + extent;
 
-        double r = static_cast<double>(config.get_int_radius());
+        double r = config.get_int_radius();
         double upper = r + threshold;
         double lower = r - threshold;
         
@@ -52,7 +51,7 @@ public:
 class SphereOracle3D {
     AMRConfig config;
     uint64_t cx, cy, cz;
-    uint64_t bandwidth;
+    double bandwidth;
 
 public:
     SphereOracle3D(const AMRConfig& cfg) : config(cfg) {
@@ -78,7 +77,7 @@ public:
         double extent = size * 0.8660254;
         double threshold = bandwidth + extent;
 
-        double r = static_cast<double>(config.get_int_radius());
+        double r = config.get_int_radius();
         double upper = r + threshold;
         double lower = r - threshold;
 

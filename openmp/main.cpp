@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
     AMRConfig cfg;
     cfg.max_level = 15; 
     cfg.fine_level = 9;
-    cfg.coarse_level = 3;
+    cfg.coarse_level = 4;
     cfg.center = {0.5, 0.5};
     cfg.radius = 0.25;
 
@@ -133,7 +133,8 @@ int main(int argc, char** argv) {
     std::cout << "\nTotal execution time: " << total_duration.count() << " ms" << std::endl;
     
     // Save SVG
-    MeshVisualizer::save_svg(tree, "mesh_2d.svg");
+    std::string filename = "mesh_2d_" + std::to_string(omp_get_num_threads()) + ".svg";
+    MeshVisualizer::save_svg(tree, filename);
 
     return 0;
 }

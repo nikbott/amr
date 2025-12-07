@@ -1,0 +1,157 @@
+=== AMR OpenMP Thread Scaling Benchmark ===
+Date: Sun Dec  7 10:42:54 AM -03 2025
+-------------------------------------------
+
+### Threads: 1
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=10
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 1072           | 0           
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 1072 -> 1252
+Balance time: 24 ms
+
+Total execution time: 25 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 2
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=10
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 1072           | 0           
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 1072 -> 1252
+Balance time: 14 ms
+
+Total execution time: 16 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 4
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=10
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 1072           | 0           
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 1072 -> 1252
+Balance time: 13 ms
+
+Total execution time: 14 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 8
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=10
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 1072           | 0           
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 1072 -> 1252
+Balance time: 17 ms
+
+Total execution time: 19 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 16
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=10
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 12          
+1         | 16             | 11          
+2         | 64             | 9           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 1072           | 0           
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 1072 -> 1252
+Balance time: 22 ms
+
+Total execution time: 57 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 32
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=10
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 2           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 1072           | 0           
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 1072 -> 1252
+Balance time: 12 ms
+
+Total execution time: 17 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 64
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=10
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 4           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 1           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 1072           | 0           
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 1072 -> 1252
+Balance time: 14 ms
+
+Total execution time: 23 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------

@@ -139,13 +139,8 @@ public:
         }
 
         for (int iter = 0; iter < max_iter; ++iter) {
-            // 1. Build map for O(1) lookups
-            // Serial map building is usually fastest unless we have concurrent map
-            std::unordered_map<uint64_t, Node> node_map;
-            node_map.reserve(leaves.size());
-            for(const auto& n : leaves) node_map[n.code] = n;
-
-            // 2. Parallel Neighbor Search
+            // 1. Parallel Neighbor Search
+            // Since leaves are sorted, we can use Binary Search instead of building a Map
             std::vector<std::vector<uint64_t>> thread_refine_codes(omp_get_max_threads());
 
             #pragma omp parallel
@@ -170,12 +165,13 @@ public:
 
                             uint64_t coarse_n_code = base_n_code & mask;
 
-                            // We can't check 'to_refine_codes' here easily without locking, 
-                            // so we just check existence in the tree
-                            auto it = node_map.find(coarse_n_code);
-                            if (it != node_map.end()) {
-                                if (it->second.level == curr_search_level) {
-                                    thread_refine_codes[tid].push_back(it->second.code);
+                            // Binary Search for the neighbor using lower_bound
+                            Node target_node = {coarse_n_code, 0};
+                            auto it = std::lower_bound(leaves.begin(), leaves.end(), target_node);
+                            
+                            if (it != leaves.end() && it->code == coarse_n_code) {
+                                if (it->level == curr_search_level) {
+                                    thread_refine_codes[tid].push_back(it->code);
                                     break;
                                 }
                             }
@@ -185,7 +181,7 @@ public:
                 }
             }
 
-            // 3. Deduplicate candidates
+            // 2. Deduplicate candidates
             std::unordered_set<uint64_t> to_refine_codes;
             for (const auto& tc : thread_refine_codes) {
                 for (auto code : tc) to_refine_codes.insert(code);
@@ -193,7 +189,8 @@ public:
 
             if (to_refine_codes.empty()) break;
 
-            // 4. Batch Refine
+            // 3. Batch Refine
+            // We can optimize this predicate lookup too if needed, but unordered_set is O(1)
             auto refine_predicate = [&](const Node& n, int) {
                 return to_refine_codes.count(n.code) > 0;
             };

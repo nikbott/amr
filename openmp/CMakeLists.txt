@@ -11,6 +11,7 @@ set(SOURCES
     main.cpp
 )
 
+add_compile_options(-O3)
 add_executable(amr ${SOURCES})
 
 if(OpenMP_CXX_FOUND)

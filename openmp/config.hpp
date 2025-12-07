@@ -30,11 +30,11 @@ struct AMRConfig {
         return int_c;
     }
 
-    uint64_t get_int_radius() const {
-        return static_cast<uint64_t>(radius * domain_width());
+    double get_int_radius() const {
+        return radius * domain_width();
     }
 
-    uint64_t get_int_bandwidth() const {
-        return static_cast<uint64_t>(bandwidth * domain_width());
+    double get_int_bandwidth() const {
+        return bandwidth * domain_width();
     }
 };
