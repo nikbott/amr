@@ -1,88 +1,134 @@
 #pragma once
 #include "tree.hpp"
-#include "morton.hpp"
 #include <vector>
 #include <cmath>
 
-// Decoupled Oracles: Independent of AMRConfig struct
-class CircleOracle2D {
-    uint64_t cx, cy;
-    uint64_t radius;
-    uint64_t bandwidth;
-    int coarse_level;
-    int fine_level;
+namespace amr {
+
+/**
+ * @brief Configuration for the AMR simulation.
+ */
+struct Config {
+    int max_level = 21;
+    double radius = 0.25;
+    double bandwidth = 0.05;
+    std::vector<double> center = {0.5, 0.5, 0.5};
+    int coarse_level = 3;
+    int fine_level = 9;
+
+    [[nodiscard]] uint64_t width() const { return 1ULL << max_level; }
     
-public:
-    CircleOracle2D(uint64_t center_x, uint64_t center_y, uint64_t r, uint64_t band, int c_lvl, int f_lvl) 
-        : cx(center_x), cy(center_y), radius(r), bandwidth(band), coarse_level(c_lvl), fine_level(f_lvl) {}
-
-    bool operator()(const Node& node, int max_level_grid) const {
-        auto [x, y] = Morton2D::decode(node.code);
-        uint64_t size = 1ULL << (max_level_grid - node.level);
-
-        double node_cx = x + size * 0.5;
-        double node_cy = y + size * 0.5;
-
-        double dx = node_cx - cx;
-        double dy = node_cy - cy;
-        double dist_sq = dx*dx + dy*dy;
-
-        double extent = size * 0.70710678; 
-        double threshold = bandwidth + extent;
-
-        double r_dbl = static_cast<double>(radius);
-        double upper = r_dbl + threshold;
-        double lower = r_dbl - threshold;
-        
-        double upper_sq = upper * upper;
-        double lower_sq = (lower < 0) ? 0.0 : lower * lower;
-
-        bool is_refining = (dist_sq < upper_sq) && (dist_sq > lower_sq);
-
-        return (node.level < coarse_level) || 
-               (is_refining && node.level < fine_level);
+    // Helper to get integer center coordinates
+    [[nodiscard]] std::vector<uint64_t> int_center(int dim) const {
+        uint64_t w = width();
+        std::vector<uint64_t> c;
+        for(int i=0; i<dim; ++i) c.push_back(static_cast<uint64_t>(center[i] * w));
+        return c;
     }
 };
 
-class SphereOracle3D {
+/**
+ * @brief 3D Sphere Refinement Oracle.
+ * * Determines if a node intersects a spherical shell defined by radius and bandwidth.
+ */
+class SphereOracle {
     uint64_t cx, cy, cz;
-    uint64_t radius;
-    uint64_t bandwidth;
-    int coarse_level;
-    int fine_level;
+    double radius_dbl, bandwidth_dbl; // Keep as double for precise extent calculations
+    int l_coarse, l_fine;
 
 public:
-    SphereOracle3D(uint64_t center_x, uint64_t center_y, uint64_t center_z, 
-                   uint64_t r, uint64_t band, int c_lvl, int f_lvl) 
-        : cx(center_x), cy(center_y), cz(center_z), 
-          radius(r), bandwidth(band), coarse_level(c_lvl), fine_level(f_lvl) {}
+    SphereOracle(const Config& cfg) 
+        : l_coarse(cfg.coarse_level), l_fine(cfg.fine_level) {
+        
+        auto c = cfg.int_center(3);
+        cx = c[0]; cy = c[1]; cz = c[2];
+        
+        double w = static_cast<double>(cfg.width());
+        radius_dbl = cfg.radius * w;
+        bandwidth_dbl = cfg.bandwidth * w;
+    }
 
-    bool operator()(const Node& node, int max_level_grid) const {
-        auto [x, y, z] = Morton3D::decode(node.code);
-        uint64_t size = 1ULL << (max_level_grid - node.level);
+    bool operator()(const Node& node, int max_lvl) const {
+        // Enforce strict level bounds
+        if (node.level < l_coarse) return true;
+        if (node.level >= l_fine) return false;
 
+        auto [x, y, z] = morton::decode_3d(node.code);
+        uint64_t size = 1ULL << (max_lvl - node.level);
+        
+        // Calculate node center
         double node_cx = x + size * 0.5;
         double node_cy = y + size * 0.5;
         double node_cz = z + size * 0.5;
-
+        
         double dx = node_cx - cx;
         double dy = node_cy - cy;
         double dz = node_cz - cz;
         double dist_sq = dx*dx + dy*dy + dz*dz;
 
-        double extent = size * 0.8660254;
-        double threshold = bandwidth + extent;
+        // For a cube of side 'size', the semi-diagonal is size * sqrt(3) / 2.
+        // sqrt(3)/2 approx 0.86602540378
+        double extent = size * 0.86602540378; 
+        
+        // We refine if the node's extent overlaps the target band.
+        double threshold = bandwidth_dbl + extent;
 
-        double r_dbl = static_cast<double>(radius);
-        double upper = r_dbl + threshold;
-        double lower = r_dbl - threshold;
+        double upper = radius_dbl + threshold;
+        double lower = radius_dbl - threshold;
+        if (lower < 0) lower = 0;
 
-        double upper_sq = upper * upper;
-        double lower_sq = (lower < 0) ? 0.0 : lower * lower;
-
-        bool is_refining = (dist_sq < upper_sq) && (dist_sq > lower_sq);
-
-        return (node.level < coarse_level) || 
-               (is_refining && node.level < fine_level);
+        // Check intersection: dist < upper && dist > lower
+        return (dist_sq < upper*upper && dist_sq > lower*lower);
     }
 };
+
+/**
+ * @brief 2D Circle Refinement Oracle.
+ * * Determines if a node intersects a circular ring.
+ * Uses bounding circle logic (semi-diagonal of square).
+ */
+class CircleOracle {
+    uint64_t cx, cy;
+    double radius_dbl, bandwidth_dbl;
+    int l_coarse, l_fine;
+
+public:
+    CircleOracle(const Config& cfg) 
+        : l_coarse(cfg.coarse_level), l_fine(cfg.fine_level) {
+        
+        auto c = cfg.int_center(2);
+        cx = c[0]; cy = c[1];
+        
+        double w = static_cast<double>(cfg.width());
+        radius_dbl = cfg.radius * w;
+        bandwidth_dbl = cfg.bandwidth * w;
+    }
+
+    bool operator()(const Node& node, int max_lvl) const {
+        if (node.level < l_coarse) return true;
+        if (node.level >= l_fine) return false;
+
+        auto [x, y] = morton::decode_2d(node.code);
+        uint64_t size = 1ULL << (max_lvl - node.level);
+        
+        double node_cx = x + size * 0.5;
+        double node_cy = y + size * 0.5;
+        
+        double dx = node_cx - cx;
+        double dy = node_cy - cy;
+        double dist_sq = dx*dx + dy*dy;
+
+        // For a square of side 'size', the semi-diagonal is size * sqrt(2) / 2.
+        // sqrt(2)/2 approx 0.70710678118
+        double extent = size * 0.70710678118;
+        double threshold = bandwidth_dbl + extent;
+
+        double upper = radius_dbl + threshold;
+        double lower = radius_dbl - threshold;
+        if (lower < 0) lower = 0;
+
+        return (dist_sq < upper*upper && dist_sq > lower*lower);
+    }
+};
+
+} // namespace amr
