@@ -1,64 +1,60 @@
 #pragma once
 #include "tree.hpp"
 #include <fstream>
-#include <iostream>
 #include <string>
+#include <iostream>
 
-class MeshVisualizer {
-public:
-    static void save_svg(const Quadtree& tree, const std::string& filename) {
-        std::ofstream file(filename);
-        if (!file.is_open()) {
-            std::cerr << "Error: Could not open file " << filename << std::endl;
-            return;
-        }
+namespace amr::viz {
 
-        uint64_t limit = tree.domain_width();
-        double scale_factor = 1000.0 / limit;
-
-        file << "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" "
-             << "width=\"1000\" height=\"1000\" viewBox=\"0 0 1000 1000\">\n";
-        file << "<rect width=\"1000\" height=\"1000\" fill=\"white\"/>\n";
-
-        for (const auto& node : tree.leaves) {
-            auto [coords, size] = tree.get_geometry(node);
-            double x = coords[0] * scale_factor;
-            double raw_y = coords[1] * scale_factor;
-            double h = size * scale_factor;
-            double y = 1000.0 - raw_y - h; 
-
-            file << "<rect x=\"" << x << "\" y=\"" << y 
-                 << "\" width=\"" << h << "\" height=\"" << h 
-                 << "\" style=\"fill:none;stroke:red;stroke-width:0.5\" />\n";
-        }
-
-        file << "<text x=\"10\" y=\"25\" font-family=\"Arial\" font-size=\"20\" fill=\"black\">"
-             << "Elements: " << tree.leaves.size() << "</text>\n";
-        file << "</svg>";
-        file.close();
-        std::cout << "[Viz] Saved 2D mesh to " << filename << std::endl;
+template <typename Tree>
+void write_svg(const Tree& tree, const std::string& filename) {
+    std::ofstream f(filename);
+    f << "<svg width=\"800\" height=\"800\" viewBox=\"0 0 1000 1000\" xmlns=\"http://www.w3.org/2000/svg\">\n";
+    f << "<rect width=\"1000\" height=\"1000\" fill=\"white\"/>\n";
+    
+    double scale = 1000.0 / tree.domain_width();
+    
+    for (const auto& node : tree.leaves) {
+        auto coords = tree.decode(node.code);
+        double x = coords[0] * scale;
+        double y = 1000.0 - (coords[1] * scale); // Flip Y
+        double s = (1ULL << (tree.max_level - node.level)) * scale;
+        
+        f << "<rect x=\"" << x << "\" y=\"" << (y - s) 
+          << "\" width=\"" << s << "\" height=\"" << s 
+          << "\" fill=\"none\" stroke=\"red\" stroke-width=\"0.5\"/>\n";
     }
+    f << "</svg>\n";
+    std::cout << "Wrote " << filename << " (" << tree.leaves.size() << " elements)\n";
+}
 
-    static void save_obj(const Octree& tree, const std::string& filename) {
-        std::ofstream file(filename);
-        if (!file.is_open()) return;
-
-        file << "# AMR Octree Point Cloud\n";
-        uint64_t limit = tree.domain_width();
-        double norm = 1.0 / limit; 
-
-        int count = 0;
-        for (const auto& node : tree.leaves) {
-            if (tree.leaves.size() > 50000 && (count++ % 10 != 0)) continue;
-
-            auto [coords, size] = tree.get_geometry(node);
-            double cx = (coords[0] + size * 0.5) * norm;
-            double cy = (coords[1] + size * 0.5) * norm;
-            double cz = (coords[2] + size * 0.5) * norm;
-
-            file << "v " << cx << " " << cy << " " << cz << "\n";
-        }
-        file.close();
-        std::cout << "[Viz] Saved 3D point cloud to " << filename << std::endl;
+template <typename Tree>
+void write_vtk(const Tree& tree, const std::string& filename) {
+    std::ofstream f(filename);
+    f << "# vtk DataFile Version 3.0\nAMR Mesh\nASCII\nDATASET UNSTRUCTURED_GRID\n";
+    
+    size_t n = tree.leaves.size();
+    // For 3D Octree, we output points (centers)
+    f << "POINTS " << n << " double\n";
+    
+    double norm = 1.0 / tree.domain_width();
+    
+    for (const auto& node : tree.leaves) {
+        auto coords = tree.decode(node.code);
+        uint64_t half = (1ULL << (tree.max_level - node.level)) / 2;
+        double x = (coords[0] + half) * norm;
+        double y = (coords[1] + half) * norm;
+        double z = (coords[2] + half) * norm;
+        f << x << " " << y << " " << z << "\n";
     }
-};
+    
+    f << "\nCELLS " << n << " " << 2*n << "\n";
+    for(size_t i=0; i<n; ++i) f << "1 " << i << "\n";
+    
+    f << "\nCELL_TYPES " << n << "\n";
+    for(size_t i=0; i<n; ++i) f << "1\n"; // Vertex
+    
+    std::cout << "Wrote " << filename << " (" << n << " points)\n";
+}
+
+}
