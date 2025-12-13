@@ -59,13 +59,7 @@ namespace Morton2D_GPU {
         
         // Size of the cell at this level
         uint64_t size = 1ULL << (max_level - level);
-        
-        // Center of the cell (or top-left)
-        // Code corresponds to top-left.
-        // We want the neighbor of the cell.
-        // If dx=1, we want the cell to the right.
-        // Its coordinate is x + size.
-        // But we need to be careful about overflow/underflow.
+
         
         long long nx = (long long)x + (long long)dx * size;
         long long ny = (long long)y + (long long)dy * size;
@@ -99,10 +93,7 @@ __device__ int findNodeIndex(const uint64_t* codes, const int* levels, int n, ui
     }
     
     if (ans != -1) {
-        // Check if this node actually contains the target_code
-        // A node covers [code, code + size^2) in Morton space?
-        // No, range is [code, code + 4^(max-level))
-        // 4^k = 1 << (2*k)
+
         int level = levels[ans];
         int shift = 2 * (max_level - level);
         // Be careful with 64-bit shift
@@ -163,8 +154,8 @@ void bitonicSortGPU(uint64_t* d_codes, int* d_levels, int n) {
         delete[] h_max_levels;
     }
     
-    int blockSize = 256;
-    int gridSize = (n_padded + blockSize - 1) / blockSize;
+    int blockSize = cuda_utils::getOptimalBlockSize();
+    int gridSize = cuda_utils::getGridSize(n_padded, blockSize);
     
     for (int k = 2; k <= n_padded; k *= 2) {
         for (int j = k / 2; j > 0; j /= 2) {
@@ -190,7 +181,7 @@ __global__ void scanDownSweep(int* data, int n, int stride) {
         data[idx + stride * 2 - 1] += temp;
     }
 }
-
+// Scan orchestrator creates sweep kernels
 void exclusiveScanGPU(int* d_data, int n) {
     int n_padded = 1;
     while (n_padded < n) n_padded *= 2;
@@ -199,11 +190,11 @@ void exclusiveScanGPU(int* d_data, int n) {
         CUDA_CHECK(cudaMemset(d_data + n, 0, (n_padded - n) * sizeof(int)));
     }
     
-    int blockSize = 256;
+    int blockSize = cuda_utils::getOptimalBlockSize();
     
     // Up-sweep
     for (int stride = 1; stride < n_padded; stride *= 2) {
-        int gridSize = (n_padded / (stride * 2) + blockSize - 1) / blockSize;
+        int gridSize = cuda_utils::getGridSize(n_padded / (stride * 2), blockSize);
         if (gridSize > 0) {
             scanUpSweep<<<gridSize, blockSize>>>(d_data, n_padded, stride);
             CUDA_CHECK_LAST();
@@ -216,7 +207,7 @@ void exclusiveScanGPU(int* d_data, int n) {
     
     // Down-sweep
     for (int stride = n_padded / 2; stride >= 1; stride /= 2) {
-        int gridSize = (n_padded / (stride * 2) + blockSize - 1) / blockSize;
+        int gridSize = cuda_utils::getGridSize(n_padded / (stride * 2), blockSize);
         if (gridSize > 0) {
             scanDownSweep<<<gridSize, blockSize>>>(d_data, n_padded, stride);
             CUDA_CHECK_LAST();
@@ -338,7 +329,7 @@ __global__ void expandNodesKernel(
     }
 }
 
-void refineCUDA_pure(
+void refineCUDA(
     uint64_t** d_codes_ptr,
     int** d_levels_ptr,
     int* n_nodes,
@@ -348,6 +339,7 @@ void refineCUDA_pure(
     int n = *n_nodes;
     if (n == 0) return;
     
+    // Cast de tipo do Oracle, permite a adição de outros oracles no futuro
     const CircleOracleData* oracle = (const CircleOracleData*)oracle_data_ptr;
     
     uint64_t* d_codes = *d_codes_ptr;
@@ -362,13 +354,14 @@ void refineCUDA_pure(
     CUDA_CHECK(cudaMalloc(&d_oracle_results, n * sizeof(bool)));
     CUDA_CHECK(cudaMalloc(&d_refine_flags, n * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&d_output_counts, n * sizeof(int)));
+
     // Allocate scan array with padding for power of 2
     int n_padded = 1;
     while (n_padded < n) n_padded *= 2;
     CUDA_CHECK(cudaMalloc(&d_scan, n_padded * sizeof(int)));
     
-    int blockSize = 256;
-    int gridSize = (n + blockSize - 1) / blockSize;
+    int blockSize = cuda_utils::getOptimalBlockSize();
+    int gridSize = cuda_utils::getGridSize(n, blockSize);
     
     // 1. Evaluate Oracle
     evaluateOracleKernel<<<gridSize, blockSize>>>(
@@ -451,6 +444,7 @@ __global__ void checkBalanceKernel(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
         int level = levels[idx];
+        
         // If level is too small, we can't have a neighbor at level-2
         if (level < 2) return;
         
@@ -469,12 +463,13 @@ __global__ void checkBalanceKernel(
                     
                     if (n_idx != -1) {
                         int n_level = levels[n_idx];
+
                         // Constraint: Neighbor cannot be more than 1 level coarser
                         // If n_level <= level - 2, then neighbor is too coarse.
                         // Neighbor must refine.
+
                         if (n_level <= level - 2) {
                             // Mark neighbor for refinement
-                            // Use atomic to be safe, though simple write might work
                             atomicExch(&refine_flags[n_idx], 1);
                         }
                     }
@@ -484,7 +479,7 @@ __global__ void checkBalanceKernel(
     }
 }
 
-void balanceCUDA_pure(
+void balanceCUDA(
     uint64_t** d_codes_ptr,
     int** d_levels_ptr,
     int* n_nodes,
@@ -511,8 +506,8 @@ void balanceCUDA_pure(
         while (n_padded < n) n_padded *= 2;
         CUDA_CHECK(cudaMalloc(&d_scan, n_padded * sizeof(int)));
         
-        int blockSize = 256;
-        int gridSize = (n + blockSize - 1) / blockSize;
+        int blockSize = cuda_utils::getOptimalBlockSize();
+        int gridSize = cuda_utils::getGridSize(n, blockSize);
         
         // 1. Check Balance
         checkBalanceKernel<<<gridSize, blockSize>>>(

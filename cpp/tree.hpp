@@ -10,11 +10,11 @@
 class CircleOracle2D;
 
 #ifdef USE_CUDA
-// Forward declarations for CUDA
+
 #include <cuda_runtime.h>
-void refineCUDA_pure(uint64_t** d_codes_ptr, int** d_levels_ptr, int* n_nodes,
+void refineCUDA(uint64_t** d_codes_ptr, int** d_levels_ptr, int* n_nodes,
                      const void* oracle_data, int max_level);
-void balanceCUDA_pure(uint64_t** d_codes_ptr, int** d_levels_ptr, int* n_nodes,
+void balanceCUDA(uint64_t** d_codes_ptr, int** d_levels_ptr, int* n_nodes,
                       int max_level, int max_iter);
 #endif
 
@@ -30,7 +30,7 @@ struct Node {
     }
 };
 
-// Abstract Linear Tree logic implemented via Templates
+
 template <int DIM>
 class LinearTree {
 public:
@@ -110,24 +110,25 @@ public:
         }
         gpu_dirty = false;
     }
+
+    int getGPUSize() const {
+        return d_size;
+    }
 #endif
 
-    // Refine
+
     template <typename Oracle>
     bool refine(Oracle& oracle) {
 #ifdef USE_CUDA
-        // Only attempt GPU refine if the Oracle is of a supported type
-        // We use a simple name check or trait here. For now, let's assume CircleOracle2D.
-        // In a real system we'd use a trait like is_gpu_compatible<Oracle>::value
-        if (use_gpu) {
+       if (use_gpu) {
             if constexpr (std::is_same_v<Oracle, CircleOracle2D>) {
                 if (gpu_dirty) syncToGPU();
                 
                 auto oracle_data = oracle.get_gpu_data(max_level);
                 int before = d_size;
-                refineCUDA_pure(&d_codes, &d_levels, &d_size, &oracle_data, max_level);
+                refineCUDA(&d_codes, &d_levels, &d_size, &oracle_data, max_level);
                 
-                syncFromGPU();
+                // Otimização: Não sincroniza toda estrutura, apenas compara tamanhos
                 return d_size != before;
             }
         }
@@ -178,8 +179,8 @@ public:
 #ifdef USE_CUDA
         if (use_gpu) {
             if (gpu_dirty) syncToGPU();
-            balanceCUDA_pure(&d_codes, &d_levels, &d_size, max_level, 20);
-            syncFromGPU();
+            balanceCUDA(&d_codes, &d_levels, &d_size, max_level, 20);
+            // Otimização: Não sincroniza aqui, deixa para o usuário chamar syncFromGPU() quando precisar
             return;
         }
 #endif

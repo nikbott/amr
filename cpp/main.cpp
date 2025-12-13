@@ -11,13 +11,16 @@
 #include "cuda_utils.cuh"
 #endif
 
+using namespace std;
+using namespace chrono;
+
 class MeshVisualizer {
 public:
     // Exports the Quadtree to an SVG file viewable in any browser
-    static void save_svg(const Quadtree& tree, const std::string& filename) {
-        std::ofstream file(filename);
+    static void save_svg(const Quadtree& tree, const string& filename) {
+        ofstream file(filename);
         if (!file.is_open()) {
-            std::cerr << "Error: Could not open file " << filename << std::endl;
+            cerr << "Error: Could not open file " << filename << endl;
             return;
         }
 
@@ -53,7 +56,7 @@ public:
 
         file << "</svg>";
         file.close();
-        std::cout << "[Viz] Saved 2D mesh to " << filename << std::endl;
+        cout << "[Viz] Saved 2D mesh to " << filename << endl;
     }
 };
 
@@ -65,28 +68,28 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--cuda") == 0 || strcmp(argv[i], "--gpu") == 0) {
             use_cuda = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
-            std::cout << "Options:" << std::endl;
-            std::cout << "  --cuda, --gpu    Use CUDA GPU acceleration" << std::endl;
-            std::cout << "  --help, -h       Show this help message" << std::endl;
+            cout << "Usage: " << argv[0] << " [options]" << endl;
+            cout << "Options:" << endl;
+            cout << "  --cuda, --gpu    Use CUDA GPU acceleration" << endl;
+            cout << "  --help, -h       Show this help message" << endl;
             return 0;
         }
     }
     
 #ifdef USE_CUDA
     if (use_cuda) {
-        std::cout << "--- C++ AMR with CUDA Acceleration ---" << std::endl;
+        cout << "--- C++ AMR with CUDA Acceleration ---" << endl;
         cuda_utils::printGPUInfo();
-        std::cout << std::endl;
+        cout << endl;
     } else {
-        std::cout << "--- C++ AMR (CPU Mode) ---" << std::endl;
+        cout << "--- C++ AMR (CPU Mode) ---" << endl;
     }
 #else
     if (use_cuda) {
-        std::cout << "WARNING: CUDA requested but not compiled. Running in CPU mode." << std::endl;
+        cout << "WARNING: CUDA requested but not compiled. Running in CPU mode." << endl;
     }
     use_cuda = false;
-    std::cout << "--- C++ AMR (CPU Only) ---" << std::endl;
+    cout << "--- C++ AMR (CPU Only) ---" << endl;
 #endif
     
     AMRConfig cfg;
@@ -99,62 +102,87 @@ int main(int argc, char** argv) {
     // Parse configuration arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--max_level") == 0 && i + 1 < argc) {
-            cfg.max_level = std::atoi(argv[++i]);
+            cfg.max_level = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--fine_level") == 0 && i + 1 < argc) {
-            cfg.fine_level = std::atoi(argv[++i]);
+            cfg.fine_level = atoi(argv[++i]);
         }
     }
 
-    std::cout << "Config: 2D Quadtree, MaxLvl=" << cfg.max_level << std::endl;
-    std::cout << "Mode: " << (use_cuda ? "GPU" : "CPU") << std::endl;
+    cout << "Config: 2D Quadtree, MaxLvl=" << cfg.max_level << endl;
+    cout << "Mode: " << (use_cuda ? "GPU" : "CPU") << endl;
 
     Quadtree tree(cfg.max_level, use_cuda);
     CircleOracle2D oracle(cfg);
 
     int max_steps = 16;
     
-    std::cout << std::left << std::setw(10) << "Step" 
-              << "| " << std::setw(15) << "Elements" 
-              << "| " << std::setw(12) << "Time (ms)" << std::endl;
-    std::cout << std::string(45, '-') << std::endl;
+    cout << left << setw(10) << "Step" 
+         << "| " << setw(15) << "Elements" 
+         << "| " << setw(12) << "Time (ms)" << endl;
+    cout << string(45, '-') << endl;
 
-    auto total_start = std::chrono::high_resolution_clock::now();
+    auto total_start = high_resolution_clock::now();
     
+ 
     for(int step = 0; step < max_steps; ++step) {
-        auto step_start = std::chrono::high_resolution_clock::now();
+        auto step_start = high_resolution_clock::now();
         
         bool changed = tree.refine(oracle);
         
-        auto step_end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(step_end - step_start);
+        auto step_end = high_resolution_clock::now();
+        auto duration = duration_cast<milliseconds>(step_end - step_start);
         
-        std::cout << std::left << std::setw(10) << step 
-                  << "| " << std::setw(15) << tree.leaves.size() 
-                  << "| " << std::setw(12) << duration.count() << std::endl;
+#ifdef USE_CUDA
+        size_t current_size = use_gpu ? tree.getGPUSize() : tree.leaves.size();
+#else
+        size_t current_size = tree.leaves.size();
+#endif
+        
+        cout << left << setw(10) << step 
+             << "| " << setw(15) << current_size 
+             << "| " << setw(12) << duration.count() << endl;
 
         if (!changed) {
-            std::cout << "Converged early." << std::endl;
+            cout << "Converged early." << endl;
             break;
         }
     }
 
-    std::cout << "\nRunning Balance Constraint..." << std::endl;
+    cout << "\nRunning Balance Constraint..." << endl;
+    
+#ifdef USE_CUDA
+    size_t before = use_gpu ? tree.getGPUSize() : tree.leaves.size();
+#else
     size_t before = tree.leaves.size();
-    
-    auto balance_start = std::chrono::high_resolution_clock::now();
+#endif
+
+    auto balance_start = high_resolution_clock::now();
     tree.balance();
-    auto balance_end = std::chrono::high_resolution_clock::now();
+    auto balance_end = high_resolution_clock::now();
     
-    auto balance_duration = std::chrono::duration_cast<std::chrono::milliseconds>(balance_end - balance_start);
+    auto balance_duration = duration_cast<milliseconds>(balance_end - balance_start);
+
+#ifdef USE_CUDA
+    size_t after = use_gpu ? tree.getGPUSize() : tree.leaves.size();
+#else
     size_t after = tree.leaves.size();
+#endif
     
-    std::cout << "Balance complete. Elements: " << before << " -> " << after << std::endl;
-    std::cout << "Balance time: " << balance_duration.count() << " ms" << std::endl;
+    cout << "Balance complete. Elements: " << before << " -> " << after << endl;
+    cout << "Balance time: " << balance_duration.count() << " ms" << endl;
     
-    auto total_end = std::chrono::high_resolution_clock::now();
-    auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start);
+    auto total_end = high_resolution_clock::now();
+    auto total_duration = duration_cast<milliseconds>(total_end - total_start);
     
-    std::cout << "\nTotal execution time: " << total_duration.count() << " ms" << std::endl;
+    cout << "\nTotal execution time: " << total_duration.count() << " ms" << endl;
+    
+#ifdef USE_CUDA
+    // Sincroniza GPU -> CPU apenas uma vez antes de gerar o SVG
+    if (use_gpu) {
+        cout << "Syncing GPU data for SVG export..." << endl;
+        tree.syncFromGPU();
+    }
+#endif
     
     // Save SVG
     MeshVisualizer::save_svg(tree, "mesh_2d.svg");
