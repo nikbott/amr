@@ -210,6 +210,12 @@ OpenMP_gomp_LIBRARY:FILEPATH=/usr/lib/gcc/x86_64-redhat-linux/15/libgomp.so
 //Path to the pthread library for OpenMP
 OpenMP_pthread_LIBRARY:FILEPATH=/usr/lib64/libpthread.a
 
+//The directory containing a CMake configuration file for TBB.
+TBB_DIR:PATH=/usr/lib64/cmake/TBB
+
+//Path to a library.
+TBB_LIB:FILEPATH=/usr/lib64/libtbb.so
+
 
 ########################
 # INTERNAL cache entries

@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <cstdint>
+#include <execution>
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -117,8 +118,8 @@ public:
         }
 
         // 4. Sort
-        // Using std::sort (serial) for now, could be __gnu_parallel::sort if available
-        std::sort(new_leaves.begin(), new_leaves.end());
+        // Using std::execution::par that uses OpenMP backend automatically
+        std::sort(std::execution::par, new_leaves.begin(), new_leaves.end());
         
         leaves = std::move(new_leaves);
         return true;
@@ -140,7 +141,7 @@ public:
 
         for (int iter = 0; iter < max_iter; ++iter) {
             // 1. Parallel Neighbor Search
-            // Since leaves are sorted, we can use Binary Search instead of building a Map
+
             std::vector<std::vector<uint64_t>> thread_refine_codes(omp_get_max_threads());
 
             #pragma omp parallel
