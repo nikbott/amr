@@ -128,7 +128,6 @@ public:
                 int before = d_size;
                 refineCUDA(&d_codes, &d_levels, &d_size, &oracle_data, max_level);
                 
-                // Otimização: Não sincroniza toda estrutura, apenas compara tamanhos
                 return d_size != before;
             }
         }
@@ -180,11 +179,9 @@ public:
         if (use_gpu) {
             if (gpu_dirty) syncToGPU();
             balanceCUDA(&d_codes, &d_levels, &d_size, max_level, 20);
-            // Otimização: Não sincroniza aqui, deixa para o usuário chamar syncFromGPU() quando precisar
             return;
         }
 #endif
-
         int max_iter = 20;
 
         // Generate direction vectors (excluding 0,0...)
@@ -198,9 +195,7 @@ public:
         }
 
         for (int iter = 0; iter < max_iter; ++iter) {
-            // 1. Build map for O(1) lookups
-            // Note: In extremely high performance C++, we might use binary_search on 'leaves' directly
-            // instead of building a map, but a map is safer for translation logic.
+           
             std::unordered_map<uint64_t, Node> node_map;
             node_map.reserve(leaves.size());
             for(const auto& n : leaves) node_map[n.code] = n;

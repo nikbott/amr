@@ -1,5 +1,5 @@
 === AMR OpenMP Thread Scaling Benchmark ===
-Date: Sun Dec  7 12:15:11 PM -03 2025
+Date: Mon Dec  8 03:18:20 PM -03 2025
 -------------------------------------------
 
 ### Threads: 1
@@ -15,18 +15,18 @@ Step      | Elements       | Time (ms)
 5         | 1180           | 0           
 6         | 3520           | 0           
 7         | 12064          | 0           
-8         | 44596          | 3           
-9         | 171544         | 13          
-10        | 672520         | 56          
-11        | 2662504        | 240         
-12        | 2662504        | 27          
+8         | 44596          | 2           
+9         | 171544         | 9           
+10        | 672520         | 40          
+11        | 2662504        | 158         
+12        | 2662504        | 14          
 Converged early.
 
 Running Balance Constraint...
 Balance complete. Elements: 2662504 -> 2677912
-Balance time: 18841 ms
+Balance time: 22036 ms
 
-Total execution time: 19184 ms
+Total execution time: 22263 ms
 [Viz] Saved 2D mesh to mesh_2d_1.svg
 -------------------------------------------
 
@@ -43,18 +43,18 @@ Step      | Elements       | Time (ms)
 5         | 1180           | 0           
 6         | 3520           | 0           
 7         | 12064          | 0           
-8         | 44596          | 1           
-9         | 171544         | 5           
-10        | 672520         | 24          
-11        | 2662504        | 93          
-12        | 2662504        | 7           
+8         | 44596          | 2           
+9         | 171544         | 7           
+10        | 672520         | 30          
+11        | 2662504        | 122         
+12        | 2662504        | 8           
 Converged early.
 
 Running Balance Constraint...
 Balance complete. Elements: 2662504 -> 2677912
-Balance time: 10100 ms
+Balance time: 12446 ms
 
-Total execution time: 10235 ms
+Total execution time: 12619 ms
 [Viz] Saved 2D mesh to mesh_2d_1.svg
 -------------------------------------------
 
@@ -71,18 +71,18 @@ Step      | Elements       | Time (ms)
 5         | 1180           | 0           
 6         | 3520           | 0           
 7         | 12064          | 0           
-8         | 44596          | 1           
-9         | 171544         | 5           
-10        | 672520         | 21          
-11        | 2662504        | 93          
-12        | 2662504        | 4           
+8         | 44596          | 2           
+9         | 171544         | 8           
+10        | 672520         | 28          
+11        | 2662504        | 117         
+12        | 2662504        | 5           
 Converged early.
 
 Running Balance Constraint...
 Balance complete. Elements: 2662504 -> 2677912
-Balance time: 6084 ms
+Balance time: 8536 ms
 
-Total execution time: 6213 ms
+Total execution time: 8699 ms
 [Viz] Saved 2D mesh to mesh_2d_1.svg
 -------------------------------------------
 
@@ -100,17 +100,17 @@ Step      | Elements       | Time (ms)
 6         | 3520           | 0           
 7         | 12064          | 0           
 8         | 44596          | 1           
-9         | 171544         | 6           
-10        | 672520         | 22          
-11        | 2662504        | 91          
-12        | 2662504        | 2           
+9         | 171544         | 7           
+10        | 672520         | 27          
+11        | 2662504        | 108         
+12        | 2662504        | 3           
 Converged early.
 
 Running Balance Constraint...
 Balance complete. Elements: 2662504 -> 2677912
-Balance time: 4175 ms
+Balance time: 6025 ms
 
-Total execution time: 4301 ms
+Total execution time: 6176 ms
 [Viz] Saved 2D mesh to mesh_2d_1.svg
 -------------------------------------------
 
@@ -119,26 +119,26 @@ Total execution time: 4301 ms
 Config: 2D Quadtree, MaxLvl=20
 Step      | Elements       | Time (ms)   
 ---------------------------------------------
-0         | 4              | 13          
-1         | 16             | 11          
-2         | 64             | 9           
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
 3         | 256            | 0           
 4         | 472            | 0           
 5         | 1180           | 0           
 6         | 3520           | 0           
 7         | 12064          | 0           
 8         | 44596          | 1           
-9         | 171544         | 4           
-10        | 672520         | 17          
-11        | 2662504        | 70          
-12        | 2662504        | 9           
+9         | 171544         | 6           
+10        | 672520         | 29          
+11        | 2662504        | 88          
+12        | 2662504        | 3           
 Converged early.
 
 Running Balance Constraint...
 Balance complete. Elements: 2662504 -> 2677912
-Balance time: 4457 ms
+Balance time: 5710 ms
 
-Total execution time: 4599 ms
+Total execution time: 5843 ms
 [Viz] Saved 2D mesh to mesh_2d_1.svg
 -------------------------------------------
 
@@ -156,17 +156,17 @@ Step      | Elements       | Time (ms)
 6         | 3520           | 0           
 7         | 12064          | 0           
 8         | 44596          | 1           
-9         | 171544         | 3           
-10        | 672520         | 18          
-11        | 2662504        | 65          
-12        | 2662504        | 12          
+9         | 171544         | 5           
+10        | 672520         | 21          
+11        | 2662504        | 75          
+12        | 2662504        | 2           
 Converged early.
 
 Running Balance Constraint...
 Balance complete. Elements: 2662504 -> 2677912
-Balance time: 4442 ms
+Balance time: 5804 ms
 
-Total execution time: 4547 ms
+Total execution time: 5915 ms
 [Viz] Saved 2D mesh to mesh_2d_1.svg
 -------------------------------------------
 
@@ -178,22 +178,22 @@ Step      | Elements       | Time (ms)
 0         | 4              | 2           
 1         | 16             | 0           
 2         | 64             | 0           
-3         | 256            | 0           
+3         | 256            | 1           
 4         | 472            | 0           
 5         | 1180           | 0           
 6         | 3520           | 0           
 7         | 12064          | 0           
 8         | 44596          | 1           
-9         | 171544         | 4           
-10        | 672520         | 17          
-11        | 2662504        | 66          
-12        | 2662504        | 11          
+9         | 171544         | 5           
+10        | 672520         | 23          
+11        | 2662504        | 74          
+12        | 2662504        | 2           
 Converged early.
 
 Running Balance Constraint...
 Balance complete. Elements: 2662504 -> 2677912
-Balance time: 4428 ms
+Balance time: 5502 ms
 
-Total execution time: 4536 ms
+Total execution time: 5619 ms
 [Viz] Saved 2D mesh to mesh_2d_1.svg
 -------------------------------------------

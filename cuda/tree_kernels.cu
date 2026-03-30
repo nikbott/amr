@@ -2,7 +2,7 @@
 
 #include "tree_kernels.cuh"
 #include "cuda_utils.cuh"
-#include "physics.hpp" // For CircleOracleData
+#include "physics.hpp" 
 #include <climits>
 
 // ============================================================================
@@ -108,7 +108,7 @@ __device__ int findNodeIndex(const uint64_t* codes, const int* levels, int n, ui
 }
 
 // ============================================================================
-// PARALLEL PRIMITIVES (PURE CUDA)
+// PARALLEL PRIMITIVES 
 // ============================================================================
 
 // Parallel Bitonic Sort Step
@@ -136,11 +136,11 @@ __global__ void bitonicSortStep(uint64_t* codes, int* levels, int n, int j, int 
 }
 
 void bitonicSortGPU(uint64_t* d_codes, int* d_levels, int n) {
-    // Round up to power of 2
+    
     int n_padded = 1;
     while (n_padded < n) n_padded *= 2;
     
-    // Pad if needed
+    // Arrendoda o valor de para a potência de 2 mais próxima se for maior
     if (n_padded > n) {
         uint64_t* h_max_codes = new uint64_t[n_padded - n];
         int* h_max_levels = new int[n_padded - n];
@@ -165,7 +165,7 @@ void bitonicSortGPU(uint64_t* d_codes, int* d_levels, int n) {
     }
 }
 
-// Parallel Exclusive Scan (Blelloch)
+// Parallel Exclusive Scan
 __global__ void scanUpSweep(int* data, int n, int stride) {
     int idx = (blockIdx.x * blockDim.x + threadIdx.x) * stride * 2;
     if (idx + stride < n) {
@@ -335,7 +335,7 @@ void refineCUDA(
     int* n_nodes,
     const void* oracle_data_ptr,
     int max_level
-) {
+) { 
     int n = *n_nodes;
     if (n == 0) return;
     

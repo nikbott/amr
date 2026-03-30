@@ -1,6 +1,6 @@
 #!/bin/bash
 
-RESULTS_FILE="thread_benchmark_results_20_12_2.txt"
+RESULTS_FILE="thread_benchmark_results_20_12_0.txt"
 echo "=== AMR OpenMP Thread Scaling Benchmark ===" > $RESULTS_FILE
 echo "Date: $(date)" >> $RESULTS_FILE
 echo "-------------------------------------------" >> $RESULTS_FILE

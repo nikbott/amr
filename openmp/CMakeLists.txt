@@ -11,9 +11,12 @@ set(SOURCES
     main.cpp
 )
 
-add_compile_options(-O3)
+add_compile_options(-O3 -pg)
 add_executable(amr ${SOURCES})
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(amr PUBLIC OpenMP::OpenMP_CXX)
 endif()
+
+find_package(TBB REQUIRED)
+target_link_libraries(amr PUBLIC TBB::tbb)
