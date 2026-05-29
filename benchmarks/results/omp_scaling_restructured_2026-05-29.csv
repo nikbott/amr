@@ -1,0 +1,11 @@
+# OpenMP strong-scaling — restructured omp/ backend (post cpp->omp/mpi/cuda split)
+# Fixed demo workload: max_level=20, circle/sphere oracle, refine to convergence then balance().
+# host=harpia cores=32 compiler="g++ 13.3.0 -O2 -fopenmp" date=2026-05-29
+# Determinism check: 3d_final_leaves is identical across all thread counts.
+threads,2d_balance_ms,3d_balance_ms,3d_final_leaves
+1,60,58267,89336808
+2,32,30305,89336808
+4,18,15634,89336808
+8,10,8365,89336808
+16,6,5927,89336808
+32,4,4701,89336808
