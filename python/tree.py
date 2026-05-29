@@ -1,3 +1,4 @@
+import bisect
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Callable
 from dataclasses import dataclass
@@ -80,7 +81,14 @@ class AbstractLinearTree(ABC):
         """
         Enforce 2:1 Balance Constraint (Ripple Effect).
         Ensures no two adjacent cells differ by more than 1 refinement level.
-        Batches refinements per ripple pass to minimize sorting overhead.
+
+        For each leaf and each face/corner direction, locate the single leaf
+        that *covers* the neighbour position with a `bisect` lookup on the
+        sorted leaf-code array (the greatest code <= the neighbour code, then a
+        range-containment check). If that covering leaf is coarser by >= 2
+        levels it is marked for refinement. This mirrors the C++ backends'
+        `std::lower_bound` approach and is O(log N) per query, versus the
+        previous O(N) dict rebuild + per-level walk on every ripple pass.
         """
         max_iter = 20
         # Directions excluding (0,0,...)
@@ -90,56 +98,39 @@ class AbstractLinearTree(ABC):
             directions = [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1) if not (dx==0 and dy==0 and dz==0)]
 
         for _ in range(max_iter):
-            # 1. Build Map O(N)
-            node_map = {n.code: n for n in self.leaves}
+            # Invariant: self.leaves is sorted ascending by code (refine maintains this).
+            codes = [n.code for n in self.leaves]
             to_refine_codes = set()
 
-            # 2. Scan all leaves for violations
             for node in self.leaves:
-                # We need to check if any neighbor is too coarse (level <= node.level - 2)
-                min_valid_level = node.level - 1
-                
-                # If we are already at level 0 or 1, we can't have a neighbor at -1 or -2
-                if min_valid_level < 1:
+                # A neighbour coarser than (node.level - 1) violates 2:1;
+                # impossible to find one if this node is already at level 0 or 1.
+                if node.level < 2:
                     continue
 
                 for direction in directions:
-                    # Get neighbor code at MY level first
-                    base_n_code = self._get_neighbor_code(node.code, node.level, direction)
-                    if base_n_code == -1: continue 
+                    n_code = self._get_neighbor_code(node.code, node.level, direction)
+                    if n_code == -1:
+                        continue
 
-                    # Search "up" the tree (coarser) starting from the violation threshold
-                    # We check levels: [node.level - 2, node.level - 3, ... 0]
-                    curr_search_level = node.level - 2
-                    
-                    while curr_search_level >= 0:
-                        # Calculate mask for this coarser level
-                        shift = (self.max_level - curr_search_level) * self.ndim
-                        mask = ~((1 << shift) - 1)
-                        
-                        # Align the base neighbor code to this coarser grid
-                        coarse_n_code = base_n_code & mask
-                        
-                        # If this neighbor is already marked, stop checking this direction
-                        if coarse_n_code in to_refine_codes:
-                            break
+                    # Greatest existing leaf code <= n_code: the candidate cover.
+                    idx = bisect.bisect_right(codes, n_code) - 1
+                    if idx < 0:
+                        continue
 
-                        # Check if this coarse neighbor exists in the tree
-                        if coarse_n_code in node_map:
-                            neighbor = node_map[coarse_n_code]
-                            # Confirm it is actually a leaf at this level (not just a prefix of a finer node)
-                            if neighbor.level == curr_search_level:
-                                to_refine_codes.add(neighbor.code)
-                                break # Found the leaf, stop searching coarser levels
-                        
-                        curr_search_level -= 1
+                    cand = self.leaves[idx]
+                    cand_size = 1 << (self.ndim * (self.max_level - cand.level))
+                    # Does the candidate's cell actually contain the neighbour point?
+                    if cand.code <= n_code < cand.code + cand_size:
+                        # Coarser by >= 2 levels => 2:1 violation; refine the coarse cell.
+                        if cand.level <= node.level - 2:
+                            to_refine_codes.add(cand.code)
 
-            # 3. Batch Refine
             # If no violations found in this pass, we are balanced.
             if not to_refine_codes:
                 break
 
-            # Apply refinement to all marked nodes at once
+            # Apply refinement to all marked nodes at once.
             self.refine(lambda n, ml: n.code in to_refine_codes)
 
 
