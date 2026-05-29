@@ -1,0 +1,84 @@
+Running: ./build/amr --max_level 20 --fine_level 12 --cuda
+
+✅ Benchmark finished – output saved to `cuda_benchmark.txt`
+First 20 lines of the output (for a quick sanity check):
+--- C++ AMR with CUDA Acceleration ---
+GPU 0: Tesla T4
+  Compute Capability: 7.5
+  Total Global Memory: 14.74 GB
+  Multiprocessors: 40
+  Max Threads per Block: 1024
+
+Config: 2D Quadtree, MaxLvl=20
+Mode: GPU
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3412           | 0           
+7         | 11956          | 0           
+8         | 44488          | 1           
+Overwriting tree_kernels.cu
+Overwriting CMakeLists.txt
+/content/build
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /content/build
+[ 33%] Building CXX object CMakeFiles/amr.dir/main.cpp.o
+[ 66%] Building CUDA object CMakeFiles/amr.dir/tree_kernels.cu.o
+[100%] Linking CXX executable amr
+[100%] Built target amr
+/content
+Running Benchmark...
+Testing Max Level 10...
+  CPU: 508 ms
+  GPU: 498 ms
+Testing Max Level 12...
+  CPU: 38263 ms
+  GPU: 617 ms
+Testing Max Level 14...
+  CPU: 38528 ms
+  GPU: 581 ms
+Testing Max Level 16...
+  CPU: 39788 ms
+  GPU: 571 ms
+Testing Max Level 18...
+  CPU: 40061 ms
+  GPU: 568 ms
+Testing Max Level 20...
+  CPU: 39400 ms
+  GPU: 574 ms
+--- C++ AMR with CUDA Acceleration ---
+GPU 0: Tesla T4
+  Compute Capability: 7.5
+  Total Global Memory: 14.74 GB
+  Multiprocessors: 40
+  Max Threads per Block: 1024
+
+Config: 2D Quadtree, MaxLvl=20
+Mode: GPU
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3412           | 0           
+7         | 11956          | 0           
+8         | 44488          | 1           
+9         | 171436         | 5           
+10        | 672388         | 26          
+11        | 2662372        | 115         
+12        | 2662372        | 29          
+Converged early.
+...
+Balance time: 392 ms
+
+Total execution time: 574 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
