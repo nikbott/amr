@@ -37,6 +37,11 @@ option(ENABLE_LTO "Enable Link Time Optimization (IPO)" ON)
 option(ENABLE_SANITIZERS "Enable Address/Undefined Behavior Sanitizers (Debug only)" OFF)
 option(WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 
+# Backend feature flags. OpenMP (omp/) always builds; MPI and CUDA are opt-in.
+option(AMR_BUILD_MPI  "Build the distributed MPI backend (mpi/)" OFF)
+option(AMR_BUILD_CUDA "Build the single-GPU CUDA backend (cuda/)" OFF)
+set(AMR_CUDA_ARCHITECTURES "70" CACHE STRING "CUDA arch(es) for the cuda/ backend, e.g. 80 (A100), 90 (H100)")
+
 # --- Compiler Configuration ---------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,16 +61,19 @@ if(ENABLE_LTO)
 endif()
 
 # --- Dependencies -------------------------------------------------------------
-include(FetchContent)
-
 if(BUILD_TESTING)
     include(CTest)
-    FetchContent_Declare(
-        Catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG        v3.11.0
-    )
-    FetchContent_MakeAvailable(Catch2)
+    # Prefer a system Catch2 (no network); fall back to fetching it.
+    find_package(Catch2 3 QUIET)
+    if(NOT Catch2_FOUND)
+        include(FetchContent)
+        FetchContent_Declare(
+            Catch2
+            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+            GIT_TAG        v3.11.0
+        )
+        FetchContent_MakeAvailable(Catch2)
+    endif()
 endif()
 
 # --- Library Target (AMR Core) ------------------------------------------------
@@ -117,10 +125,58 @@ if(ENABLE_SANITIZERS AND NOT MSVC)
     else()
         target_compile_options(amr PRIVATE -fsanitize=address,undefined)
         target_link_options(amr PRIVATE -fsanitize=address,undefined)
-        
+
         if(BUILD_TESTING)
             target_compile_options(amr_tests PRIVATE -fsanitize=address,undefined)
             target_link_options(amr_tests PRIVATE -fsanitize=address,undefined)
         endif()
+    endif()
+endif()
+
+# --- MPI backend (mpi/) -------------------------------------------------------
+# Opt-in: -DAMR_BUILD_MPI=ON. One rank may also use OpenMP threads internally.
+if(AMR_BUILD_MPI)
+    find_package(MPI REQUIRED COMPONENTS CXX)
+    message(STATUS "MPI backend enabled: ${MPIEXEC_EXECUTABLE}")
+
+    add_executable(amr_mpi mpi/main.cpp)
+    target_link_libraries(amr_mpi PRIVATE MPI::MPI_CXX OpenMP::OpenMP_CXX)
+    target_compile_features(amr_mpi PRIVATE cxx_std_20)
+
+    if(BUILD_TESTING)
+        add_executable(amr_mpi_tests mpi/tests.cpp)
+        target_link_libraries(amr_mpi_tests PRIVATE MPI::MPI_CXX OpenMP::OpenMP_CXX Catch2::Catch2)
+        target_compile_features(amr_mpi_tests PRIVATE cxx_std_20)
+        # mpi/tests.cpp provides its own MPI-aware main (Catch2::Catch2, not WithMain).
+        add_test(NAME MpiTests
+                 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4
+                         ${MPIEXEC_PREFLAGS} $<TARGET_FILE:amr_mpi_tests> ${MPIEXEC_POSTFLAGS})
+    endif()
+endif()
+
+# --- CUDA backend (cuda/) -----------------------------------------------------
+# Opt-in: -DAMR_BUILD_CUDA=ON. Thrust device lambdas require --extended-lambda.
+if(AMR_BUILD_CUDA)
+    enable_language(CUDA)
+    message(STATUS "CUDA backend enabled (arch ${AMR_CUDA_ARCHITECTURES})")
+
+    add_executable(amr_cuda cuda/main.cu)
+    set_target_properties(amr_cuda PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED ON
+        CUDA_ARCHITECTURES "${AMR_CUDA_ARCHITECTURES}")
+    target_compile_options(amr_cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
+
+    if(BUILD_TESTING)
+        # cuda/tests.cu uses a self-contained CHECK/REQUIRE harness (no Catch2).
+        add_executable(amr_cuda_tests cuda/tests.cu)
+        set_target_properties(amr_cuda_tests PROPERTIES
+            CUDA_STANDARD 17
+            CUDA_STANDARD_REQUIRED ON
+            CUDA_ARCHITECTURES "${AMR_CUDA_ARCHITECTURES}")
+        target_compile_options(amr_cuda_tests PRIVATE
+            $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
+        add_test(NAME CudaTests COMMAND amr_cuda_tests)
     endif()
 endif()
