@@ -194,3 +194,32 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks,cuda
 
+### AMR project ###
+# Compiled backend executables (Makefile/CMake targets: amr, test, amr_tests)
+amr
+test
+amr_tests
+omp/amr
+omp/test
+mpi/amr
+mpi/test
+cuda/amr
+cuda/test
+
+# CMake build trees
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Generated visualization output
+*.svg
+*.vtu
+*.pvtu
+
+# perf profiling
+perf.data
+perf.data.*
+
+# Editor
+.vscode/
+
