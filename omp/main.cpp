@@ -7,62 +7,62 @@
 using namespace amr;
 
 int main() {
-    std::cout << "=== AMR System ===\n";
+    std::cout << "=== AMR System (SoA + Strong Types) ===\n";
 
-    // 1. Configure
     Config cfg;
     cfg.max_level = 20;
     cfg.coarse_level = 3;
-    cfg.fine_level = 9;
-    cfg.radius = 0.35;
+    cfg.fine_level = 10;
+    cfg.radius = 0.25;
 
-    // 2. 2D Simulation
+    // 2D Simulation
     {
         std::cout << "\n--- 2D Quadtree ---\n";
         Quadtree tree(cfg.max_level);
         CircleOracle oracle(cfg);
 
-        // Refine loop
         int steps = 0;
         while(tree.refine(oracle)) {
-            std::cout << "Refine step " << ++steps << ": " << tree.leaves.size() << " leaves\n";
+            // New API usage: tree.size()
+            std::cout << "Refine step " << ++steps << ": " << tree.size() << " leaves\n";
         }
 
-        // Balance
-        std::cout << "Balancing...\n";
-        auto start = std::chrono::high_resolution_clock::now();
-        tree.balance();
-        auto end = std::chrono::high_resolution_clock::now();
-        std::cout << "Balanced in " 
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(end-start).count() 
-                  << "ms. Final size: " << tree.leaves.size() << "\n";
-
-        viz::write_svg(tree, "mesh_2d.svg");
-    }
-
-    // 3. 3D Simulation
-    {
-        std::cout << "\n--- 3D Octree ---\n";
-        Octree tree(cfg.max_level);
-        SphereOracle oracle(cfg);
-
-        // Refine
-        int steps = 0;
-        while(tree.refine(oracle)) {
-            std::cout << "Refine step " << ++steps << ": " << tree.leaves.size() << " leaves\n";
-        }
-
-        // Balance
         std::cout << "Balancing...\n";
         auto start = std::chrono::high_resolution_clock::now();
         tree.balance();
         auto end = std::chrono::high_resolution_clock::now();
         
+        // Best Practice #4: Run Design-by-Contract verification
+        tree.verify();
+
         std::cout << "Balanced in " 
                   << std::chrono::duration_cast<std::chrono::milliseconds>(end-start).count() 
-                  << "ms. Final size: " << tree.leaves.size() << "\n";
+                  << "ms. Final size: " << tree.size() << "\n";
 
-        viz::write_vtk(tree, "mesh_3d.vtk");
+        viz::write_svg(tree, "mesh_2d.svg");
+    }
+
+    // 3D Simulation
+    {
+        std::cout << "\n--- 3D Octree ---\n";
+        Octree tree(cfg.max_level);
+        SphereOracle oracle(cfg);
+
+        int steps = 0;
+        while(tree.refine(oracle)) {
+            std::cout << "Refine step " << ++steps << ": " << tree.size() << " leaves\n";
+        }
+
+        std::cout << "Balancing...\n";
+        auto start = std::chrono::high_resolution_clock::now();
+        tree.balance();
+        auto end = std::chrono::high_resolution_clock::now();
+        
+        // tree.verify(); // Check invariants
+
+        std::cout << "Balanced in " 
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(end-start).count() 
+                  << "ms. Final size: " << tree.size() << "\n";
     }
 
     return 0;
