@@ -1,5 +1,11 @@
 # OpenMP Parallelization Strategy for AMR
 
+> **Note — imported from the earlier `origin/main` development line.** The
+> parallelization concepts (threading model, parallel refine/balance, SoA
+> layout) apply directly to the current `omp/` backend, which descends from
+> this work. Some file/line references and the CMake snippet may point to the
+> old flat layout (`openmp/`, `cpp/`) rather than today's `omp/ mpi/ cuda/`.
+
 This document explains every parallelization decision made in the OpenMP implementation of the Adaptive Mesh Refinement (AMR) algorithm, comparing it to the sequential baseline and CUDA implementation.
 
 ---

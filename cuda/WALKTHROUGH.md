@@ -1,5 +1,14 @@
 # Análise Comparativa: AMR Sequencial vs CUDA
 
+> **⚠️ Documento histórico (linha `origin/main`).** Descreve a implementação
+> CUDA *original*, com bitonic sort e scan escritos à mão em
+> `cpp/tree_kernels.cu`. O backend atual (`cuda/tree.cuh`) foi reescrito sobre
+> **Thrust** e substitui aqueles kernels — eles permanecem apenas no histórico
+> de `origin/main`. Referências a `cpp/...` e `tree_kernels.cu - Linha NNN`
+> apontam para o layout antigo, não para a árvore atual `omp/ mpi/ cuda/`.
+> Mantido como referência conceitual (Morton, pipeline de refino) e base para
+> uma eventual comparação "hand-rolled vs Thrust" no artigo.
+
 Este documento apresenta uma análise técnica aprofundada da implementação de **Adaptive Mesh Refinement (AMR)** comparando a versão sequencial em C++ com a versão paralelizada em CUDA.
 
 ---
@@ -65,9 +74,9 @@ graph TB
 
 | Componente | Arquivo |
 |------------|---------|
-| `LinearTree` | [tree.hpp](file:///home/ronan/amr/cpp/tree.hpp) |
-| `CircleOracle2D` | [physics.hpp](file:///home/ronan/amr/cpp/physics.hpp) |
-| CUDA Kernels | [tree_kernels.cu](file:///home/ronan/amr/cpp/tree_kernels.cu) |
+| `LinearTree` | `cuda/tree.cuh` (atual) — era `cpp/tree.hpp` |
+| `CircleOracle2D` | `cuda/physics.cuh` (atual) — era `cpp/physics.hpp` |
+| CUDA Kernels | `cuda/tree.cuh` (Thrust, atual) — eram `cpp/tree_kernels.cu` (hand-rolled, histórico) |
 
 ---
 
