@@ -1,0 +1,38 @@
+GPU Information:
+===================================
+NVIDIA GeForce RTX 2080 SUPER, 570.153.02, 8192 MiB
+===================================
+
+Starting AMR CUDA application...
+--- C++ AMR with CUDA Acceleration ---
+GPU 0: NVIDIA GeForce RTX 2080 SUPER
+  Compute Capability: 7.5
+  Total Global Memory: 7.60 GB
+  Multiprocessors: 48
+  Max Threads per Block: 1024
+
+Config: 2D Quadtree, MaxLvl=20
+Mode: GPU
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3412           | 0           
+7         | 11956          | 1           
+8         | 44488          | 2           
+9         | 171436         | 5           
+10        | 672388         | 23          
+11        | 2662372        | 78          
+12        | 2662372        | 25          
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 2662372 -> 2677900
+Balance time: 249 ms
+
+Total execution time: 387 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
