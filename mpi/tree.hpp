@@ -145,45 +145,59 @@ public:
     template <typename Oracle>
     bool coarsen(const Oracle& oracle) {
         size_t n = leaf_codes.size();
-        if (n == 0) return false;
         constexpr int siblings = 1 << DIM;
-        wksp_flags.assign(n, 0);
         bool changed = false;
-        #pragma omp parallel for schedule(static) reduction(|:changed)
-        for (size_t i = 0; i < n; ++i) {
-            if (i + siblings > n) continue;
-            uint64_t raw_code = leaf_codes[i];
-            int lvl = leaf_levels[i];
-            if (lvl == 0) continue;
-            uint64_t shift = static_cast<uint64_t>(DIM) * (max_level - lvl);
-            uint64_t mask_siblings = (1ULL << DIM) - 1;
-            if (((raw_code >> shift) & mask_siblings) != 0) continue;
-            bool valid_family = true;
-            for (int k = 1; k < siblings; ++k) {
-                if (leaf_levels[i+k] != lvl) { valid_family = false; break; }
-            }
-            if (valid_family && !oracle({MortonCode{raw_code}, lvl - 1}, max_level)) {
-                wksp_flags[i] = 1; 
-                for(int k=1; k<siblings; ++k) wksp_flags[i+k] = 2; 
-                changed = true;
+
+        // Local marking pass. A rank whose partition is empty (n == 0) does no
+        // work here, but it MUST still reach the collectives below
+        // (all_reduce_or and update_partition_map). Returning early on n == 0
+        // would skip those MPI_Allreduce/Allgather calls and deadlock every
+        // rank that still has leaves to coarsen.
+        if (n > 0) {
+            wksp_flags.assign(n, 0);
+            #pragma omp parallel for schedule(static) reduction(|:changed)
+            for (size_t i = 0; i < n; ++i) {
+                if (i + siblings > n) continue;
+                uint64_t raw_code = leaf_codes[i];
+                int lvl = leaf_levels[i];
+                if (lvl == 0) continue;
+                uint64_t shift = static_cast<uint64_t>(DIM) * (max_level - lvl);
+                uint64_t mask_siblings = (1ULL << DIM) - 1;
+                if (((raw_code >> shift) & mask_siblings) != 0) continue;
+                bool valid_family = true;
+                for (int k = 1; k < siblings; ++k) {
+                    if (leaf_levels[i+k] != lvl) { valid_family = false; break; }
+                }
+                if (valid_family && !oracle({MortonCode{raw_code}, lvl - 1}, max_level)) {
+                    wksp_flags[i] = 1;
+                    for(int k=1; k<siblings; ++k) wksp_flags[i+k] = 2;
+                    changed = true;
+                }
             }
         }
+
+        // Collective: every rank participates regardless of local emptiness.
         if (!mpi::all_reduce_or(changed)) return false;
-        std::vector<uint64_t> keep_mask(n);
-        #pragma omp parallel for
-        for (size_t i = 0; i < n; ++i) keep_mask[i] = (wksp_flags[i] != 2) ? 1 : 0;
-        wksp_offsets.resize(n);
-        parallel::exclusive_scan(keep_mask, wksp_offsets, wksp_scan_buffer);
-        size_t new_size = wksp_offsets.back() + keep_mask.back();
-        std::vector<uint64_t> nc(new_size); std::vector<uint8_t> nl(new_size);
-        #pragma omp parallel for schedule(static)
-        for (size_t i = 0; i < n; ++i) {
-            if (wksp_flags[i] == 2) continue;
-            size_t pos = wksp_offsets[i];
-            nc[pos] = leaf_codes[i];
-            nl[pos] = (wksp_flags[i] == 1) ? (uint8_t)(leaf_levels[i] - 1) : leaf_levels[i];
+
+        if (n > 0) {
+            std::vector<uint64_t> keep_mask(n);
+            #pragma omp parallel for
+            for (size_t i = 0; i < n; ++i) keep_mask[i] = (wksp_flags[i] != 2) ? 1 : 0;
+            wksp_offsets.resize(n);
+            parallel::exclusive_scan(keep_mask, wksp_offsets, wksp_scan_buffer);
+            size_t new_size = wksp_offsets.back() + keep_mask.back();
+            std::vector<uint64_t> nc(new_size); std::vector<uint8_t> nl(new_size);
+            #pragma omp parallel for schedule(static)
+            for (size_t i = 0; i < n; ++i) {
+                if (wksp_flags[i] == 2) continue;
+                size_t pos = wksp_offsets[i];
+                nc[pos] = leaf_codes[i];
+                nl[pos] = (wksp_flags[i] == 1) ? (uint8_t)(leaf_levels[i] - 1) : leaf_levels[i];
+            }
+            leaf_codes = std::move(nc); leaf_levels = std::move(nl);
         }
-        leaf_codes = std::move(nc); leaf_levels = std::move(nl);
+
+        // Collective: rebuilds the global partition map across all ranks.
         update_partition_map();
         return true;
     }
