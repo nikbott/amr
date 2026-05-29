@@ -1,0 +1,199 @@
+=== AMR OpenMP Thread Scaling Benchmark ===
+Date: Sun Dec  7 10:51:56 AM -03 2025
+-------------------------------------------
+
+### Threads: 1
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=12
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3388           | 0           
+7         | 11884          | 3           
+8         | 44272          | 15          
+9         | 170812         | 58          
+10        | 669988         | 224         
+11        | 2652580        | 935         
+12        | 2652580        | 145         
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 2652580 -> 2667964
+Balance time: 109689 ms
+
+Total execution time: 111075 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 2
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=12
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3388           | 0           
+7         | 11884          | 2           
+8         | 44272          | 9           
+9         | 170812         | 38          
+10        | 669988         | 149         
+11        | 2652580        | 623         
+12        | 2652580        | 72          
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 2652580 -> 2667964
+Balance time: 61195 ms
+
+Total execution time: 62093 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 4
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=12
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3388           | 0           
+7         | 11884          | 1           
+8         | 44272          | 7           
+9         | 170812         | 29          
+10        | 669988         | 113         
+11        | 2652580        | 459         
+12        | 2652580        | 38          
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 2652580 -> 2667964
+Balance time: 39828 ms
+
+Total execution time: 40479 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 8
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=12
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 0           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3388           | 0           
+7         | 11884          | 1           
+8         | 44272          | 7           
+9         | 170812         | 28          
+10        | 669988         | 99          
+11        | 2652580        | 393         
+12        | 2652580        | 20          
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 2652580 -> 2667964
+Balance time: 30279 ms
+
+Total execution time: 30832 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 16
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=12
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 11          
+1         | 16             | 11          
+2         | 64             | 0           
+3         | 148            | 6           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3388           | 2           
+7         | 11884          | 2           
+8         | 44272          | 8           
+9         | 170812         | 27          
+10        | 669988         | 96          
+11        | 2652580        | 380         
+12        | 2652580        | 21          
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 2652580 -> 2667964
+Balance time: 33574 ms
+
+Total execution time: 34152 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 32
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=12
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 1           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 0           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3388           | 0           
+7         | 11884          | 1           
+8         | 44272          | 6           
+9         | 170812         | 23          
+10        | 669988         | 91          
+11        | 2652580        | 378         
+12        | 2652580        | 18          
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 2652580 -> 2667964
+Balance time: 33659 ms
+
+Total execution time: 34185 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
+
+### Threads: 64
+--- C++ AMR (OpenMP Mode) ---
+Config: 2D Quadtree, MaxLvl=12
+Step      | Elements       | Time (ms)   
+---------------------------------------------
+0         | 4              | 2           
+1         | 16             | 0           
+2         | 64             | 0           
+3         | 148            | 1           
+4         | 364            | 0           
+5         | 1072           | 0           
+6         | 3388           | 0           
+7         | 11884          | 1           
+8         | 44272          | 6           
+9         | 170812         | 26          
+10        | 669988         | 94          
+11        | 2652580        | 372         
+12        | 2652580        | 19          
+Converged early.
+
+Running Balance Constraint...
+Balance complete. Elements: 2652580 -> 2667964
+Balance time: 33712 ms
+
+Total execution time: 34240 ms
+[Viz] Saved 2D mesh to mesh_2d.svg
+-------------------------------------------
