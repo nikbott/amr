@@ -1,0 +1,55 @@
+# Pre-commit hooks for amr/
+# Install once:  pip install --user pre-commit && pre-commit install
+# Run manually:  pre-commit run --all-files   (or  make lint)
+---
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.(svg|sif)$'
+      - id: end-of-file-fixer
+        exclude: '\.(svg|sif)$'
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: check-yaml
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.8
+    hooks:
+      - id: clang-format
+        files: '\.(cpp|hpp|cu|cuh|h|cc)$'
+
+  - repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.13
+    hooks:
+      - id: cmake-format
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        files: '^python/.*\.py$'
+        args: ["--fix"]
+      - id: ruff-format
+        files: '^python/.*\.py$'
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+      - id: codespell
+        exclude: '\.(svg|sif|data|raw)$'
+        args: ["--ignore-words-list=hist,nd,thirdparty"]
+
+  # Local hook — never commit perf.data, SVGs, or binaries from cuda/.
+  # These are build artifacts; .gitignore is the primary defense, this is the backstop.
+  - repo: local
+    hooks:
+      - id: no-build-artifacts
+        name: refuse to commit build artifacts
+        entry: bash -c 'echo "Refusing to commit build artifacts (perf.data / *.svg / cuda binaries). Add to .gitignore." && exit 1'
+        language: system
+        files: '(perf\.data.*|mesh_.*\.svg|cuda/(amr|test)$)'
