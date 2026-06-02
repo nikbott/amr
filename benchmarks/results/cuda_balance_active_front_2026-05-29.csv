@@ -1,0 +1,13 @@
+# CUDA 2:1 balance — active-front vs reference (whole-mesh re-check)
+# Source: cuda/bench.cu (make -C cuda bench ARCH=sm_86 && ./cuda/bench)
+# balance() = active-front (production); balance_ref() = simple whole-mesh per-pass baseline.
+# Output is byte-identical between the two (verified: cuda/tests.cu run_test_active_parity).
+# gpu="NVIDIA RTX A2000 12GB" driver=580.159.03 cuda=12.0 arch=sm_86 host=harpia date=2026-05-29
+# Timing via cudaEvent around balance(); single run (see git history for run-to-run variance ~5%).
+fixture,dim,leaves_pre,leaves_post,passes,ref_ms,active_ms,speedup
+sphere,2,171436,174268,3,1.104,1.270,0.87
+sphere,3,88917256,89336808,4,429.672,233.215,1.84
+tower,2,37,124,11,0.944,1.040,0.91
+tower,3,71,428,10,0.872,0.962,0.91
+crack,2,196606,294904,14,7.310,4.344,1.68
+crack,3,39146836,48933536,10,401.744,423.440,0.95
