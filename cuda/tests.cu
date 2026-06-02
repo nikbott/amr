@@ -309,6 +309,50 @@ void run_test_random_cloud() {
 }
 
 // ==================================================================================
+// ACTIVE-FRONT PARITY
+// The active-front balance() must produce a tree byte-identical to the simple
+// whole-mesh balance_ref(). We refine an identical tree two ways and diff the
+// final (codes, levels). This is the correctness oracle for the headline GPU
+// optimization (cuda/tree.cuh: balance vs balance_ref).
+// ==================================================================================
+
+template <int DIM, typename Oracle>
+void check_balance_parity(const char* name, int max_lvl, Oracle oracle, int refine_steps) {
+    LinearTree<DIM> ref(max_lvl);
+    LinearTree<DIM> act(max_lvl);
+    for (int i = 0; i < refine_steps; ++i) { ref.refine(oracle); act.refine(oracle); }
+
+    ref.balance_ref();   // baseline: whole-mesh re-check every pass
+    act.balance();       // headline: active-front re-check
+
+    REQUIRE(ref.size() == act.size());
+
+    thrust::host_vector<uint64_t> rc = ref.codes,  ac = act.codes;
+    thrust::host_vector<uint8_t>  rl = ref.levels, al = act.levels;
+    for (size_t i = 0; i < rc.size(); ++i) {
+        CHECK(rc[i] == ac[i]);
+        CHECK(rl[i] == al[i]);
+    }
+    // Independent geometric confirmation that the active-front tree is balanced.
+    std::vector<uint64_t> sc(ac.begin(), ac.end());
+    std::vector<uint8_t>  sl(al.begin(), al.end());
+    CHECK(count_balance_violations<DIM>(sc, sl, max_lvl) == 0);
+    CHECK(ref.last_balance_iters == act.last_balance_iters);   // same pass count
+    std::cout << "  [parity] " << name << " " << DIM << "D OK ("
+              << act.size() << " leaves, " << act.last_balance_iters << " passes)\n";
+}
+
+template <int DIM>
+void run_test_active_parity() {
+    std::cout << "[Test] Active-front parity " << DIM << "D...\n";
+    check_balance_parity<DIM>("tower", 6, TowerOracle(6, DIM), 6);
+    check_balance_parity<DIM>("cloud", 8, CloudOracle{5}, 8);
+    check_balance_parity<DIM>("random", 5, RandomRefineOracle{}, 5);
+    check_balance_parity<DIM>("graded", 5, GradedOracle{5, DIM}, 5);
+    std::cout << "[Test] Active-front parity " << DIM << "D... PASSED\n";
+}
+
+// ==================================================================================
 // MAIN
 // ==================================================================================
 
@@ -357,7 +401,10 @@ int main() {
     
     run_test_random_cloud<2>();
     run_test_random_cloud<3>();
-    
+
+    run_test_active_parity<2>();
+    run_test_active_parity<3>();
+
     test_safety();
     std::cout << "All tests passed.\n";
     return 0;
