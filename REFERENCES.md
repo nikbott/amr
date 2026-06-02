@@ -16,6 +16,38 @@ Morton (Z-order) encoding that this library implements. The 2:1 balance
 algorithm, ghost-layer protocol, and Z-curve partitioning all derive from
 this paper. Used as the design baseline for `omp/tree.hpp` and `mpi/tree.hpp`.
 
+**[SSB2008]** H. Sundar, R. S. Sampath, G. Biros.
+*Bottom-Up Construction and 2:1 Balance Refinement of Linear Octrees in Parallel.*
+SIAM J. Sci. Comput., **30**(5), 2675–2708 (2008).
+DOI: [10.1137/070681727](https://doi.org/10.1137/070681727).
+
+The canonical parallel construction + **minimal 2:1 balance** of linear
+Morton octrees via the *insulation-layer* property (no octant outside the 3^d
+envelope can force a split). Output is the *coarsest* (minimal) balanced
+octree; execution is iterative but bounded. Reference implementation = Dendro
+(`github.com/paralab/Dendro-5.01`). See `docs/gpu-balance-notes.md` for how the
+balance kernels here relate to it.
+
+**[IBG2012]** T. Isaac, C. Burstedde, O. Ghattas.
+*Low-Cost Parallel Algorithms for 2:1 Octree Balance.*
+IEEE IPDPS 2012, 426–437. DOI: [10.1109/IPDPS.2012.47](https://doi.org/10.1109/IPDPS.2012.47).
+
+The **GPU-amenable balance algorithm** we target: *octant preclusion* + the
+`Reduce` step (collapse each family to one representative, |R| ≤ |S|/2^d), so
+balance reduces to sort + binary-search + compaction + `Complete` instead of a
+per-pass ripple. `Reduce` (Fig. 8), generate-coarse-neighbourhood + `Linearize`
+(Fig. 6), and the preclusion variant (Fig. 7) are transcribed in
+`docs/gpu-balance-notes.md`.
+
+**[IBWG2015]** T. Isaac, C. Burstedde, L. C. Wilcox, O. Ghattas.
+*Recursive Algorithms for Distributed Forests of Octrees.*
+SIAM J. Sci. Comput., **37**(5), C497–C531 (2015).
+DOI: [10.1137/140970963](https://doi.org/10.1137/140970963). arXiv:1406.0089.
+
+Recursive **ghost/halo-layer construction** that works on arbitrarily refined
+octrees (no 2:1 precondition) — the design reference for the `mpi/` ghost
+exchange (Stage 2 tuning) and the multi-GPU halo path.
+
 **[Holke2018]** J. Holke. *Scalable algorithms for parallel tree-based adaptive
 mesh refinement with general element types.* PhD thesis, Univ. of Bonn (2018).
 Later: J. Holke et al., *t8code v1.0*, J. Open Source Softw. (2024).
