@@ -20,10 +20,12 @@
 #include <random>
 #include <iostream>
 #include <array>
+#include <filesystem>
 
 #include "tree.hpp"
 #include "core.hpp"
 #include "physics.hpp"
+#include "../common/mesh_io.hpp"
 
 using namespace amr;
 using namespace Catch::Matchers;
@@ -314,6 +316,96 @@ TEMPLATE_TEST_CASE("2:1 Balance & Ripple Algorithm (Holke §3.3)", "[balance]", 
         
         int violations = count_balance_violations(tree);
         REQUIRE(violations == 0);
+    }
+}
+
+TEMPLATE_TEST_CASE("Binary mesh+field format round-trip (mesh_io C.2)",
+                   "[mesh_io][integration]", Quadtree, Octree) {
+    constexpr int DIM = (std::is_same<TestType, Quadtree>::value) ? 2 : 3;
+
+    // Build a non-uniform mesh.
+    int max_lvl = 6;
+    TestType tree(max_lvl);
+    std::mt19937_64 rng(7);
+    for (int i = 0; i < 4; ++i)
+        tree.refine([&](const Node& n, int) { return n.level < 5 && (rng() % 3 == 0); });
+
+    // Pack into a MeshData with a non-trivial bbox + two fields (f64 and f32).
+    mesh_io::MeshData m;
+    m.dim = DIM;
+    m.max_level = static_cast<uint32_t>(max_lvl);
+    m.origin = {{1.5, -2.0, 3.25}};
+    m.size   = {{100.0, 50.0, 12.5}};
+    for (const auto& node : tree) {
+        m.codes.push_back(node.code.value);
+        m.levels.push_back(static_cast<uint8_t>(node.level));
+    }
+    mesh_io::Field err{"dic_error", true, {}};
+    mesh_io::Field lvl{"level_f32", false, {}};
+    for (size_t i = 0; i < m.codes.size(); ++i) {
+        err.values.push_back(std::sin(static_cast<double>(i)) * 1.0e-3);
+        lvl.values.push_back(static_cast<double>(m.levels[i]));
+    }
+    m.fields = {err, lvl};
+
+    auto path = (std::filesystem::temp_directory_path() /
+                 ("amr_mesh_io_" + std::to_string(DIM) + "d.bin")).string();
+
+    SECTION("write/read preserves geometry, codes, levels, and fields") {
+        mesh_io::write(path, m);
+        mesh_io::MeshData r = mesh_io::read(path);
+
+        REQUIRE(r.dim == m.dim);
+        REQUIRE(r.max_level == m.max_level);
+        for (uint32_t k = 0; k < m.dim; ++k) {
+            REQUIRE(r.origin[k] == m.origin[k]);   // f64 bbox is exact
+            REQUIRE(r.size[k]   == m.size[k]);
+        }
+        REQUIRE(r.codes == m.codes);               // bit-exact
+        REQUIRE(r.levels == m.levels);
+
+        REQUIRE(r.fields.size() == 2);
+        REQUIRE(r.fields[0].name == "dic_error");
+        REQUIRE(r.fields[0].f64);
+        REQUIRE(r.fields[0].values == err.values);              // f64 exact
+        REQUIRE(r.fields[1].name == "level_f32");
+        REQUIRE_FALSE(r.fields[1].f64);
+        for (size_t i = 0; i < lvl.values.size(); ++i)
+            REQUIRE_THAT(r.fields[1].values[i], WithinAbs(lvl.values[i], 1e-5));  // f32 round-off
+        std::filesystem::remove(path);
+    }
+
+    SECTION("rejects a corrupt magic") {
+        { std::ofstream bad(path, std::ios::binary); bad << "XXXXnonsense"; }
+        REQUIRE_THROWS_AS(mesh_io::read(path), std::runtime_error);
+        std::filesystem::remove(path);
+    }
+}
+
+TEST_CASE("Binary mesh+field format edge cases (mesh_io C.2)", "[mesh_io]") {
+    auto path = (std::filesystem::temp_directory_path() / "amr_mesh_io_edge.bin").string();
+
+    SECTION("empty mesh and field-less round-trip") {
+        mesh_io::MeshData m; m.dim = 3; m.max_level = 10;
+        mesh_io::write(path, m);
+        mesh_io::MeshData r = mesh_io::read(path);
+        REQUIRE(r.codes.empty());
+        REQUIRE(r.fields.empty());
+        REQUIRE(r.dim == 3);
+        std::filesystem::remove(path);
+    }
+
+    SECTION("padding: n not a multiple of 8 round-trips with a trailing field") {
+        mesh_io::MeshData m; m.dim = 2; m.max_level = 4;
+        m.codes = {0, 1, 2, 3, 4};            // n = 5 -> 3 pad bytes before n_fields
+        m.levels = {1, 1, 1, 1, 1};
+        m.fields = {mesh_io::Field{"f", true, {0.1, 0.2, 0.3, 0.4, 0.5}}};
+        mesh_io::write(path, m);
+        mesh_io::MeshData r = mesh_io::read(path);
+        REQUIRE(r.codes == m.codes);
+        REQUIRE(r.fields.size() == 1);
+        REQUIRE(r.fields[0].values == m.fields[0].values);
+        std::filesystem::remove(path);
     }
 }
 
