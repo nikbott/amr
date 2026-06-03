@@ -346,16 +346,132 @@ public:
         return true;
     }
 
+    // Number of ripple passes the last balance*() call performed.
+    int last_balance_iters = 0;
+
     /**
-     * @brief Enforces the 2:1 Balance Constraint (Ripple Algorithm).
-     * @details 
-     * Ensures that no two adjacent leaves differ by more than 1 level.
-     * This uses the iterative "Ripple" approach described in [Holke 2018, Ch 8]:
-     * 1. Detect neighbors that are too coarse (level < my_level - 1).
-     * 2. Mark those neighbors for refinement.
-     * 3. Apply refinement and repeat until no violations exist.
+     * @brief Active-front 2:1 balance (production).
+     * @details Byte-identical output to balance_ref(), but after pass 1 only the
+     * advancing refinement front is re-checked (a cell can newly violate 2:1 only
+     * if a face-neighbour just got finer), so cost tracks the front, not all N.
+     * Mirrors the verified CUDA backend (`cuda/tree.cuh`). [Holke2018 §3.3]
+     *
+     * A `dirty` mask drives the re-check. After refining cells {j} in a pass, the
+     * only cells that can newly violate are the children of {j} and the
+     * equal-or-finer face-neighbours of those children (range-marked from the fine
+     * side) — a provably complete superset, hence identical flags. An adaptive
+     * fallback (children pre-filter + dirty-count backstop -> `front_collapsed`)
+     * reverts to a full check on wide fronts so it never regresses.
      */
     void balance() {
+        last_balance_iters = 0;
+        constexpr int siblings = 1 << DIM;
+        std::vector<std::array<int, DIM>> dirs;
+        if constexpr (DIM == 2) dirs = {{1,0}, {-1,0}, {0,1}, {0,-1}};
+        else dirs = {{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}};
+
+        std::vector<uint8_t> dirty(leaf_codes.size(), 1);   // pass 1: every leaf
+        std::vector<uint8_t> child_mask, dirty_next;
+        bool front_collapsed = false;
+
+        while (true) {
+            size_t n = leaf_codes.size();
+            wksp_flags.assign(n, 0);
+            bool violation = false;
+
+            #pragma omp parallel for schedule(dynamic, 1024) reduction(|:violation)
+            for (size_t i = 0; i < n; ++i) {
+                if (!dirty[i]) continue;
+                MortonCode code{leaf_codes[i]};
+                int lvl = leaf_levels[i];
+
+                for (const auto& dir : dirs) {
+                    MortonCode n_code_base = get_neighbor_code(code, lvl, dir);
+                    if (n_code_base.value == UINT64_MAX) continue;
+                    int search_lvl = lvl - 2;
+                    if (search_lvl < 0) continue;
+
+                    int shift = (max_level - search_lvl) * DIM;
+                    uint64_t mask = (shift >= 64) ? 0 : (~0ULL << shift);
+                    uint64_t target_code = n_code_base.value & mask;
+
+                    auto it = std::lower_bound(leaf_codes.begin(), leaf_codes.end(), target_code);
+                    if (it != leaf_codes.end() && *it == target_code) {
+                        size_t idx = std::distance(leaf_codes.begin(), it);
+                        if (leaf_levels[idx] <= search_lvl) { wksp_flags[idx] = 1; violation = true; }
+                    } else if (it != leaf_codes.begin()) {
+                        auto prev = it - 1;
+                        size_t prev_idx = std::distance(leaf_codes.begin(), prev);
+                        uint64_t prev_code = *prev;
+                        int prev_lvl = leaf_levels[prev_idx];
+                        uint64_t size = 1ULL << (DIM * (max_level - prev_lvl));
+                        if (prev_code <= target_code && (prev_code + size) > target_code && prev_lvl <= search_lvl) {
+                            wksp_flags[prev_idx] = 1; violation = true;
+                        }
+                    }
+                }
+            }
+            if (!violation) break;
+            ++last_balance_iters;
+
+            size_t old_n = n;
+            refine_from_flags();                 // wksp_offsets: old->new starts; wksp_flags: which old were refined
+            size_t new_n = leaf_codes.size();
+
+            // Seed the next pass's dirty mask over the NEW array (active front).
+            // Adaptive fallback: if the front is a large fraction, a full check is
+            // cheaper than maintaining it (see cuda/tree.cuh for the rationale).
+            long long refined = static_cast<long long>(new_n - old_n) / (siblings - 1);
+            if (front_collapsed || refined * siblings * 64 > static_cast<long long>(new_n)) {
+                dirty.assign(new_n, 1);
+                continue;
+            }
+
+            // Phase A: mark just-created children (over OLD refined cells).
+            child_mask.assign(new_n, 0);
+            #pragma omp parallel for
+            for (size_t i = 0; i < old_n; ++i) {
+                if (!wksp_flags[i]) continue;
+                size_t base = wksp_offsets[i];
+                for (int k = 0; k < siblings; ++k) child_mask[base + k] = 1;
+            }
+
+            // Phase B: from each new child, mark its equal-or-finer face-neighbours
+            // (range [n_code, n_code+child_size) on the new sorted codes).
+            dirty_next = child_mask;
+            #pragma omp parallel for schedule(dynamic, 1024)
+            for (size_t c = 0; c < new_n; ++c) {
+                if (!child_mask[c]) continue;
+                MortonCode code{leaf_codes[c]};
+                int lvl = leaf_levels[c];
+                uint64_t my_size = 1ULL << (DIM * (max_level - lvl));
+                for (const auto& dir : dirs) {
+                    MortonCode nc = get_neighbor_code(code, lvl, dir);
+                    if (nc.value == UINT64_MAX) continue;
+                    auto lo = std::lower_bound(leaf_codes.begin(), leaf_codes.end(), nc.value);
+                    auto hi = std::lower_bound(leaf_codes.begin(), leaf_codes.end(), nc.value + my_size);
+                    for (auto it = lo; it != hi; ++it)
+                        dirty_next[std::distance(leaf_codes.begin(), it)] = 1;
+                }
+            }
+
+            // Backstop: once the front is a large fraction, stop tracking it.
+            long long dirty_count = 0;
+            #pragma omp parallel for reduction(+:dirty_count)
+            for (size_t c = 0; c < new_n; ++c) dirty_count += dirty_next[c];
+            if (dirty_count * 8 > static_cast<long long>(new_n)) front_collapsed = true;
+
+            dirty.swap(dirty_next);
+        }
+    }
+
+    /**
+     * @brief Reference 2:1 balance: re-checks the whole mesh every ripple pass.
+     * @details Simple and obviously correct ([Holke2018 §3.3]); kept as the parity
+     * oracle and baseline for the active-front balance().
+     */
+    void balance_ref() {
+        last_balance_iters = 0;
         std::vector<std::array<int, DIM>> dirs;
         if constexpr (DIM == 2) dirs = {{1,0}, {-1,0}, {0,1}, {0,-1}};
         else dirs = {{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}};
@@ -365,18 +481,14 @@ public:
             wksp_flags.assign(n, 0);
             bool violation = false;
 
-            #pragma omp parallel for schedule(dynamic, 1024)
+            #pragma omp parallel for schedule(dynamic, 1024) reduction(|:violation)
             for (size_t i = 0; i < n; ++i) {
                 MortonCode code{leaf_codes[i]};
                 int lvl = leaf_levels[i];
-                
+
                 for (const auto& dir : dirs) {
                     MortonCode n_code_base = get_neighbor_code(code, lvl, dir);
-                    // FIXED: Handle boundary sentinel
                     if (n_code_base.value == UINT64_MAX) continue;
-
-                    // 2:1 Constraint: Neighbor cannot be coarser than (lvl - 1).
-                    // If neighbor is lvl - 2 or coarser, we have a violation.
                     int search_lvl = lvl - 2;
                     if (search_lvl < 0) continue;
 
@@ -385,47 +497,23 @@ public:
                     uint64_t target_code = n_code_base.value & mask;
 
                     auto it = std::lower_bound(leaf_codes.begin(), leaf_codes.end(), target_code);
-                    
-                    bool found_coarse_neighbor = false;
-                    size_t coarse_idx = 0;
-
-                    // Case A: Exact Match (Neighbor is exactly at the start of a Search Level block)
                     if (it != leaf_codes.end() && *it == target_code) {
                         size_t idx = std::distance(leaf_codes.begin(), it);
-                        if (leaf_levels[idx] <= search_lvl) {
-                            found_coarse_neighbor = true;
-                            coarse_idx = idx;
-                        }
-                    } 
-                    // Case B: Predecessor (Neighbor covers the point but starts earlier)
-                    else if (it != leaf_codes.begin()) {
+                        if (leaf_levels[idx] <= search_lvl) { wksp_flags[idx] = 1; violation = true; }
+                    } else if (it != leaf_codes.begin()) {
                         auto prev = it - 1;
                         size_t prev_idx = std::distance(leaf_codes.begin(), prev);
                         uint64_t prev_code = *prev;
                         int prev_lvl = leaf_levels[prev_idx];
-                        
-                        // Check coverage
                         uint64_t size = 1ULL << (DIM * (max_level - prev_lvl));
-                        if (prev_code <= target_code && (prev_code + size) > target_code) {
-                            if (prev_lvl <= search_lvl) {
-                                found_coarse_neighbor = true;
-                                coarse_idx = prev_idx;
-                            }
-                        }
-                    }
-
-                    if (found_coarse_neighbor) {
-                        #pragma omp atomic write
-                        wksp_flags[coarse_idx] = 1;
-                        
-                        if (!violation) {
-                            #pragma omp atomic write
-                            violation = true;
+                        if (prev_code <= target_code && (prev_code + size) > target_code && prev_lvl <= search_lvl) {
+                            wksp_flags[prev_idx] = 1; violation = true;
                         }
                     }
                 }
             }
             if (!violation) break;
+            ++last_balance_iters;
             refine_from_flags();
         }
     }
