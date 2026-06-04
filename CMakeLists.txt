@@ -110,6 +110,10 @@ endif()
 add_executable(amr omp/main.cpp)
 target_link_libraries(amr PRIVATE core)
 
+# --- Executable: Balance benchmark (active-front vs reference) -----------------
+add_executable(amr_omp_bench omp/bench.cpp)
+target_link_libraries(amr_omp_bench PRIVATE core)
+
 # --- Executable: Tests --------------------------------------------------------
 if(BUILD_TESTING)
     add_executable(amr_tests omp/tests.cpp)
