@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Release gate: a tagged commit must pass a clean Release build + full tests.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libomp-dev openmpi-bin libopenmpi-dev catch2
+      - name: Build + test (Release, OpenMP + MPI)
+        env:
+          OMPI_MCA_btl: tcp,self
+          OMPI_MCA_rmaps_base_oversubscribe: "1"
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAMR_BUILD_MPI=ON
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+
+  # Build the reproducible CPU container if its definition exists, then publish a
+  # GitHub Release. The container step self-skips until container/amr-cpu.def lands
+  # (Stage 2 / pending the layout reconciliation), so this workflow is green today.
+  publish:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write          # create the GitHub Release
+      packages: write          # push the image to GHCR (if built)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for Apptainer definition
+        id: defcheck
+        run: |
+          if [ -f container/amr-cpu.def ]; then echo "have_def=true" >> "$GITHUB_OUTPUT";
+          else echo "have_def=false" >> "$GITHUB_OUTPUT"; echo "::notice::container/amr-cpu.def not present yet — skipping image build"; fi
+      - name: Set up Apptainer
+        if: steps.defcheck.outputs.have_def == 'true'
+        uses: eWaterCycle/setup-apptainer@v2
+      - name: Build CPU image
+        if: steps.defcheck.outputs.have_def == 'true'
+        run: apptainer build "amr-cpu_${GITHUB_SHA::8}.sif" container/amr-cpu.def
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            amr-cpu_*.sif
+          fail_on_unmatched_files: false
