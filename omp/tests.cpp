@@ -317,6 +317,57 @@ TEMPLATE_TEST_CASE("2:1 Balance & Ripple Algorithm (Holke §3.3)", "[balance]", 
     }
 }
 
+TEMPLATE_TEST_CASE("Active-front balance parity (byte-identical vs balance_ref)",
+                   "[balance][parity]", Quadtree, Octree) {
+    constexpr int DIM = (std::is_same<TestType, Quadtree>::value) ? 2 : 3;
+
+    // Tree-independent oracles (decode the Node's own code) so two trees refine identically.
+    auto decode = [](MortonCode code) {
+        if constexpr (DIM == 2) return morton::decode_2d(code);
+        else return morton::decode_3d(code);
+    };
+
+    auto run_parity = [&](const char* name, int max_lvl, auto oracle, int steps) {
+        TestType ref(max_lvl), act(max_lvl);
+        for (int i = 0; i < steps; ++i) { ref.refine(oracle); act.refine(oracle); }
+
+        ref.balance_ref();   // whole-mesh baseline
+        act.balance();       // active-front
+
+        INFO("fixture=" << name << " DIM=" << DIM);
+        REQUIRE(ref.size() == act.size());
+        for (size_t i = 0; i < ref.size(); ++i) {
+            REQUIRE(ref[i].code.value == act[i].code.value);
+            REQUIRE(ref[i].level == act[i].level);
+        }
+        REQUIRE(count_balance_violations(act) == 0);   // independent geometric check
+        REQUIRE(ref.last_balance_iters == act.last_balance_iters);
+    };
+
+    SECTION("Tower (deep ripple)") {
+        int L = 6;
+        run_parity("tower", L, [L, decode](const Node& n, int) {
+            uint64_t mid = (1ULL << L) / 2, size = 1ULL << (L - n.level);
+            auto c = decode(n.code);
+            bool hit = true;
+            for (int k = 0; k < DIM; ++k) if (!(c[k].value <= mid && c[k].value + size > mid)) hit = false;
+            return hit && n.level < L;
+        }, L);
+    }
+    SECTION("Random cloud") {
+        run_parity("cloud", 8, [](const Node& n, int) {
+            if (n.level >= 5) return false;
+            return (n.code.value % 7 == 0 || n.code.value % 13 == 0);
+        }, 8);
+    }
+    SECTION("Deterministic hash") {
+        run_parity("random", 5, [](const Node& n, int) {
+            if (n.level >= 4) return false;
+            return (n.code.value * 0x9e3779b97f4a7c15ULL) % 3 == 0;
+        }, 5);
+    }
+}
+
 TEST_CASE("Safety & Edge Cases", "[safety]") {
     // Only need one dimension type to test general logic logic
     using TestType = Quadtree;
