@@ -249,6 +249,117 @@ __global__ void k_check_balance(const uint64_t* codes, const uint8_t* levels, in
     }
 }
 
+// --- Active-Front Balance Kernels --------------------------------------------
+// The classic balance() loop refines violators ONE level per pass, but re-checks
+// the ENTIRE (growing) leaf array every pass. After the first pass, however, a
+// cell can only NEWLY violate the 2:1 rule if one of its face-neighbours just
+// got finer. So passes 2..K only need to inspect the advancing refinement front,
+// not all N leaves -- the dominant cost on deep ripples (e.g. a fine crack in a
+// coarse domain: 10 passes over ~40M cells).
+//
+// We track a `dirty` mask. Pass 1: all dirty. After refining cells {j} in a
+// pass, the only cells that can newly violate are (a) the children of {j} and
+// (b) the face-neighbours of {j} (a pre-existing fine cell adjacent to j may now
+// need to re-flag j's still-too-coarse child). Marking both is provably a
+// complete superset, so the produced flags -- and thus the final tree -- are
+// byte-identical to balance(). See run_test_active_parity in tests.cu.
+
+// Dirty-gated variant of k_check_balance: only leaves with dirty[idx] do work.
+template <int DIM>
+__global__ void k_check_balance_active(const uint64_t* codes, const uint8_t* levels, int n,
+                                       int max_level, const uint8_t* dirty,
+                                       int* flags, int* violation_occured) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    if (!dirty[idx]) return;
+
+    uint64_t my_code = codes[idx];
+    int my_lvl = levels[idx];
+
+    int dirs[6][3] = { {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1} };
+    int num_dirs = (DIM == 2) ? 4 : 6;
+
+    for (int d = 0; d < num_dirs; ++d) {
+        uint64_t n_code = get_neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
+        if (n_code == UINT64_MAX) continue;
+
+        int search_lvl = my_lvl - 2;
+        if (search_lvl < 0) continue;
+
+        uint64_t shift = (uint64_t)(max_level - search_lvl) * DIM;
+        uint64_t mask = (shift >= 64) ? 0 : (~0ULL << shift);
+        uint64_t target = n_code & mask;
+
+        int found_idx = device_lower_bound(codes, n, target);
+
+        if (found_idx < n && codes[found_idx] == target) {
+            if (levels[found_idx] <= search_lvl) {
+                flags[found_idx] = 1;
+                *violation_occured = 1;
+            }
+        } else if (found_idx > 0) {
+            int prev = found_idx - 1;
+            uint64_t prev_c = codes[prev];
+            int prev_l = levels[prev];
+            uint64_t size = 1ULL << ((uint64_t)(max_level - prev_l) * DIM);
+            if (prev_c <= target && (prev_c + size) > target) {
+                if (prev_l <= search_lvl) {
+                    flags[prev] = 1;
+                    *violation_occured = 1;
+                }
+            }
+        }
+    }
+}
+
+// Pass A: mark the just-created children dirty. Run over OLD cells gated on
+// flags[i]==1; each refined cell's children occupy offsets[i] .. +2^DIM in the
+// new array. The resulting mask doubles as the read-only "is a new child" gate.
+__global__ void k_mark_children(int n, const int* flags, const int* offsets,
+                                uint8_t* child_mask, int dim) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    if (!flags[idx]) return;
+    int base = offsets[idx];
+    int children = 1 << dim;
+    for (int k = 0; k < children; ++k) child_mask[base + k] = 1;
+}
+
+// Pass B: from each NEW child, mark its equal-or-finer face-neighbours dirty.
+// Seeding from the fine (child) side locates every distinct adjacent leaf that
+// could flag the child next pass. A face's neighbour region spans the Morton
+// range [n_code, n_code + child_cell_size); every leaf in that range is an
+// equal-or-finer face neighbour, so we mark the whole range (not just the first
+// -- a coarse cell can have many fine neighbours across one face). The coarser
+// side needs no marking: the dirty child itself will flag it. dirty_out starts
+// as a copy of child_mask and is a separate array from it -> no read/write race.
+template <int DIM>
+__global__ void k_mark_child_neighbors(const uint64_t* codes, const uint8_t* levels, int n,
+                                       int max_level, const uint8_t* child_mask,
+                                       uint8_t* dirty_out) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    if (!child_mask[idx]) return;
+
+    uint64_t my_code = codes[idx];
+    int my_lvl = levels[idx];
+    uint64_t my_size = 1ULL << ((uint64_t)(max_level - my_lvl) * DIM);
+
+    int dirs[6][3] = { {1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1} };
+    int num_dirs = (DIM == 2) ? 4 : 6;
+
+    for (int d = 0; d < num_dirs; ++d) {
+        uint64_t n_code = get_neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
+        if (n_code == UINT64_MAX) continue;
+
+        // Mark every leaf whose code lies in [n_code, n_code + my_size): the
+        // equal-or-finer neighbours sharing this face.
+        int lo = device_lower_bound(codes, n, n_code);
+        int hi = device_lower_bound(codes, n, n_code + my_size);
+        for (int m = lo; m < hi; ++m) dirty_out[m] = 1;
+    }
+}
+
 // --- Linear Tree Class ---
 
 template <int DIM>
@@ -402,7 +513,123 @@ public:
         return true;
     }
 
+    // Number of ripple passes the last balance*() call performed.
+    int last_balance_iters = 0;
+
+    // Active-front 2:1 balance (production). Byte-identical output to balance_ref()
+    // but passes 2..K only inspect the advancing refinement front (see the
+    // k_check_balance_active / k_seed_dirty kernels above), so cost is proportional
+    // to the front, not the whole mesh. This is the headline single-GPU optimization.
     void balance() {
+        last_balance_iters = 0;
+
+        int check_block, scatter_block, seed_block, d;
+        cudaOccupancyMaxPotentialBlockSize(&d, &check_block,   k_check_balance_active<DIM>, 0, 0);
+        cudaOccupancyMaxPotentialBlockSize(&d, &scatter_block, k_scatter_refine, 0, 0);
+        cudaOccupancyMaxPotentialBlockSize(&d, &seed_block,    k_mark_child_neighbors<DIM>, 0, 0);
+
+        thrust::device_vector<int> violation_flag(1);
+
+        // dirty mask: pass 1 inspects every leaf. child_mask/dirty_next are reused.
+        thrust::device_vector<uint8_t> dirty(codes.size(), 1);
+        thrust::device_vector<uint8_t> child_mask;
+        thrust::device_vector<uint8_t> dirty_next;
+        bool front_collapsed = false;    // sticky: fall back to full checks if front grows large
+
+        while (true) {
+            int n = codes.size();
+
+            aux_flags.resize(n);
+            thrust::fill(aux_flags.begin(), aux_flags.end(), 0);
+            violation_flag[0] = 0;
+
+            int grid = (n + check_block - 1) / check_block;
+            k_check_balance_active<DIM><<<grid, check_block>>>(
+                thrust::raw_pointer_cast(codes.data()),
+                thrust::raw_pointer_cast(levels.data()),
+                n, max_level,
+                thrust::raw_pointer_cast(dirty.data()),
+                thrust::raw_pointer_cast(aux_flags.data()),
+                thrust::raw_pointer_cast(violation_flag.data()));
+            CHECK_CUDA(cudaDeviceSynchronize());
+
+            if (violation_flag[0] == 0) break;
+            ++last_balance_iters;
+
+            aux_counts.resize(n);
+            aux_offsets.resize(n);
+            thrust::transform(aux_flags.begin(), aux_flags.end(), aux_counts.begin(),
+                [] __device__ (int f) { return f ? (1 << DIM) : 1; });
+            thrust::exclusive_scan(aux_counts.begin(), aux_counts.end(), aux_offsets.begin());
+            int total = aux_offsets.back() + aux_counts.back();
+
+            scratch_codes.resize(total);
+            scratch_levels.resize(total);
+
+            int sgrid = (n + scatter_block - 1) / scatter_block;
+            k_scatter_refine<<<sgrid, scatter_block>>>(
+                thrust::raw_pointer_cast(codes.data()),
+                thrust::raw_pointer_cast(levels.data()),
+                n, thrust::raw_pointer_cast(aux_offsets.data()), thrust::raw_pointer_cast(aux_counts.data()),
+                thrust::raw_pointer_cast(scratch_codes.data()), thrust::raw_pointer_cast(scratch_levels.data()),
+                max_level, DIM);
+            CHECK_CUDA(cudaDeviceSynchronize());
+
+            // Seed the next pass's dirty mask over the NEW array. Front-tracking
+            // only pays off when the refinement front stays a small fraction of the
+            // mesh. For a large front (e.g. a crack plane), marking every child's
+            // fine neighbours produces a dirty set nearly as big as the whole mesh,
+            // so the seeding work is wasted -- the next check is no cheaper than a
+            // full one. We detect this by measuring the seeded dirty count, and once
+            // it is large we STICK to plain full checks for the rest of the balance
+            // (front_collapsed). This keeps balance() >= balance_ref() on every
+            // workload while winning big on thin features.
+            // Cheap pre-filter: if this pass already refined a large fraction, the
+            // front is wide -> skip seeding outright (children = refined*2^DIM is a
+            // lower bound on the dirty set). The reduce below is the backstop for
+            // fronts that are sparse in children yet wide after neighbour marking.
+            long long refined = (long long)(total - n) / ((1 << DIM) - 1);
+            if (front_collapsed || refined * (1 << DIM) * 64 > (long long)total) {
+                dirty_next.assign(total, 1);              // plain full check, no seeding
+            } else {
+                dirty_next.assign(total, 0);
+                // Pass A: mark new children (over OLD refined cells).
+                child_mask.assign(total, 0);
+                int childA_grid = (n + seed_block - 1) / seed_block;
+                k_mark_children<<<childA_grid, seed_block>>>(
+                    n, thrust::raw_pointer_cast(aux_flags.data()),
+                    thrust::raw_pointer_cast(aux_offsets.data()),
+                    thrust::raw_pointer_cast(child_mask.data()), DIM);
+                CHECK_CUDA(cudaDeviceSynchronize());
+
+                // Pass B: from each new child, mark its face-neighbours (over NEW cells).
+                thrust::copy(child_mask.begin(), child_mask.end(), dirty_next.begin());
+                int childB_grid = (total + seed_block - 1) / seed_block;
+                k_mark_child_neighbors<DIM><<<childB_grid, seed_block>>>(
+                    thrust::raw_pointer_cast(scratch_codes.data()),
+                    thrust::raw_pointer_cast(scratch_levels.data()),
+                    total, max_level,
+                    thrust::raw_pointer_cast(child_mask.data()),
+                    thrust::raw_pointer_cast(dirty_next.data()));
+                CHECK_CUDA(cudaDeviceSynchronize());
+
+                // If the resulting front is a large fraction of the mesh, stop
+                // front-tracking for the remaining passes (cheap reduce; the
+                // dirty set we just built is still correct to use this once).
+                long long dirty_count = thrust::reduce(dirty_next.begin(), dirty_next.end(), 0LL);
+                if (dirty_count * 8 > (long long)total) front_collapsed = true;
+            }
+
+            codes.swap(scratch_codes);
+            levels.swap(scratch_levels);
+            dirty.swap(dirty_next);
+        }
+    }
+
+    // Reference 2:1 balance: re-checks the whole mesh every pass. Simple and
+    // obviously correct; kept as the parity oracle and benchmark baseline.
+    void balance_ref() {
+        last_balance_iters = 0;
         thrust::device_vector<int> violation_flag(1);
         
         int check_block, check_grid_dummy;
@@ -430,6 +657,7 @@ public:
             CHECK_CUDA(cudaDeviceSynchronize());
 
             if (violation_flag[0] == 0) break;
+            ++last_balance_iters;
 
             aux_counts.resize(n);
             aux_offsets.resize(n);

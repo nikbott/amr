@@ -490,6 +490,29 @@ __global__ void checkBalanceKernel(
 > [!WARNING]
 > **Race Condition**: Múltiplas threads podem tentar marcar o mesmo nó. `atomicExch` garante atomicidade, mas como sempre escrevemos 1, não há problema de ordem.
 
+### Otimização: Balanceamento por Frente Ativa (*active-front*)
+
+> [!NOTE]
+> **Implementação atual**: `cuda/tree.cuh` — `balance()` (produção) e `balance_ref()` (referência/oráculo). Benchmark: `cuda/bench.cu`; números em `benchmarks/results/cuda_balance_active_front_2026-05-29.csv`.
+
+O laço de balanceamento ingênuo (`balance_ref()`) re-inspeciona **todas as N folhas** a cada passo do *ripple*. Mas, depois do primeiro passo, uma célula só pode passar a violar a regra 2:1 se um de seus vizinhos de face acabou de ser refinado. Logo os passos 2..K só precisam olhar a **frente de refinamento** que avança, não a malha inteira — o custo dominante em *ripples* profundos (ex.: uma trinca fina num domínio grosseiro: 10 passos sobre ~40 M células).
+
+`balance()` mantém uma máscara `dirty`:
+
+1. **Passo 1**: tudo sujo (inspeção completa).
+2. Após refinar as células `{j}` de um passo, só podem violar a seguir: **(a)** os filhos de `{j}` e **(b)** os vizinhos de face desses filhos. Semear pelo lado *fino* (o filho) — e marcar todo o intervalo Morton `[n_code, n_code + tam_filho)` de cada face — captura **todos** os vizinhos distintos, inclusive quando uma célula grosseira tem muitos vizinhos finos numa mesma face. Isso é um superconjunto comprovadamente completo, então os *flags* — e a árvore final — são **byte-idênticos** a `balance_ref()` (teste `run_test_active_parity`).
+
+**Fallback adaptativo**: quando a frente é uma fração grande da malha (ex.: o plano de uma trinca), marcar os vizinhos finos de todos os filhos produz um `dirty` quase do tamanho da malha — o trabalho de semeadura é desperdiçado. Um pré-filtro barato (`refined·2^DIM` vs. `total`) e um *backstop* por redução (`dirty_count` vs. `total/8`) fazem o `balance()` recair para a inspeção completa (`front_collapsed`), garantindo que ele **nunca regrida** abaixo de `balance_ref()` de forma significativa.
+
+| Fixture | Folhas | Passos | `balance_ref` | `balance` (active) | *Speedup* |
+|---|---|---|---|---|---|
+| esfera 3D | 89 M | 4 | 430 ms | 233 ms | **1.84×** |
+| trinca 2D | 295 k | 14 | 7.3 ms | 4.3 ms | **1.68×** |
+| trinca 3D | 49 M | 10 | 402 ms | 423 ms | 0.95× (frente larga → fallback) |
+
+> [!NOTE]
+> A frente-ativa ganha em *features* finas (o caso canônico de AMR) e fica em ~paridade na frente larga adversarial. RTX A2000, CUDA 12.0, `arch=sm_86`.
+
 ### Busca Binária na GPU
 
 > [!NOTE]
