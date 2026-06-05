@@ -32,8 +32,9 @@ repos:
     rev: v2.3.0
     hooks:
       - id: codespell
-        exclude: '\.(svg|sif|data|raw)$'
-        args: ["--ignore-words-list=hist,nd,thirdparty"]
+        # Skip binaries, notebooks, and the Portuguese implementation walkthrough.
+        exclude: '(\.(svg|sif|data|raw|ipynb)$|WALKTHROUGH\.md$)'
+        args: ["--ignore-words-list=hist,nd,thirdparty,sequencial"]
 
   # Local hook — never commit perf.data, SVGs, or binaries from cuda/.
   # These are build artifacts; .gitignore is the primary defense, this is the backstop.
