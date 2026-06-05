@@ -1,6 +1,6 @@
-# Backend validation against SOTA (omp / mpi / python)
+# Backend validation against SOTA (omp / mpi / cuda)
 
-Validation of the `omp/`, `mpi/`, and `python/` backends against the
+Validation of the `omp/`, `mpi/`, and `cuda/` backends against the
 state-of-the-art parallel-AMR literature (p4est, Dendro-5.01, t8code), from a
 verified deep-research pass (2026-06-03). Citation keys in
 [`REFERENCES.md`](../REFERENCES.md). Companion: [`gpu-balance-notes.md`](gpu-balance-notes.md).
@@ -44,12 +44,16 @@ cited AMR sources.
 | **Ghost exchange** | dense two-phase `MPI_Alltoall` + `MPI_Alltoallv` (`exchange_data()`, `tree.hpp:437`) | p4est uses a dedicated ghost object + **sparse symmetric non-blocking point-to-point** (R_pq≠∅ ⟺ R_qp≠∅), *not* global Alltoallv | Move to **sparse pairwise** exchange or `MPI_Neighbor_alltoallv` on a distributed-graph comm. Biggest scalability win at high rank counts. |
 | Empty partitions | all ranks reach collectives (coarsen-deadlock fixed, `tree.hpp:151-156`) | required invariant | **validated** — correct |
 
-## python/ (reference oracle) — `python/tree.py`
+## Reference oracle (historical: `python/`, removed)
 
-| Aspect | Our code | SOTA | Action |
-|---|---|---|---|
-| Balance algorithm | bisect/`lower_bound` ripple | **correct** ground-truth: the balance predicate "o,r unbalanced only if o ∈ I(r)" is exactly a `lower_bound` insulation check | **validated** as a trustworthy oracle |
-| Invariants checked | should enforce: sorted+unique, volume=1, 2:1, Morton round-trip, idempotent balance | these are the canonical AMR invariants | Ensure all five are asserted in `test_balance.py`/`tests.py` (audit + fill gaps) |
+The pure-Python `Quadtree`/`Octree` formerly served as the parity oracle: its
+balance predicate ("o,r unbalanced only if o ∈ I(r)") is exactly a `lower_bound`
+insulation check, validated as a trustworthy ground truth. The Python backend
+was **removed** (2026-06-05) once the in-tree C++ `balance_ref()` oracle (the
+brute-force reference in `omp/tests.cpp` / `cuda/tree.cuh`) subsumed that role;
+cross-backend parity now compares omp ↔ mpi ↔ cuda directly. The canonical AMR
+invariants (sorted+unique, volume=1, 2:1, Morton round-trip, idempotent balance)
+remain asserted in the C++ Catch2 suites.
 
 ## Prioritized action list
 

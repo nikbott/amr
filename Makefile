@@ -18,7 +18,7 @@ CMAKE_FEATURE_FLAGS := \
     -DAMR_BUILD_CUDA=$(WITH_CUDA) \
     -DENABLE_SANITIZERS=$(WITH_SANITIZE)
 
-.PHONY: help lint format configure build test test-python parity ci-local \
+.PHONY: help lint format configure build test parity ci-local \
         clean distclean container-cpu container-gpu slurm-strong figs
 
 help: ## list available targets
@@ -45,18 +45,14 @@ build: configure ## build all enabled backends
 test: build ## run C++/CUDA unit tests via ctest
 	ctest --test-dir $(BUILD_DIR) --output-on-failure
 
-test-python: ## run Python pytest suite (no build needed)
-	@cd python && python -m pytest -v tests.py 2>/dev/null || \
-	    { echo "python tests skipped — install pytest first"; exit 0; }
-
-parity: build ## cross-backend parity test (Python ↔ OMP ↔ MPI ↔ CUDA)
+parity: build ## cross-backend parity test (OMP ↔ MPI ↔ CUDA)
 	@if [ -x scripts/parity.py ]; then \
-	    python scripts/parity.py --backends omp,mpi,python; \
+	    python3 scripts/parity.py --backends omp,mpi; \
 	else \
 	    echo "[stub] parity test added in Stage 2 — skipping"; \
 	fi
 
-ci-local: lint test test-python parity ## full local verification (matches CI)
+ci-local: lint test parity ## full local verification (matches CI)
 	@echo "ci-local: green"
 
 # --- Containers ---------------------------------------------------------------

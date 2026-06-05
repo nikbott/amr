@@ -107,22 +107,6 @@ jobs:
             -DAMR_BUILD_CUDA=ON -DAMR_CUDA_ARCHITECTURES=70 -DBUILD_TESTING=ON
           cmake --build build-cuda --target amr_cuda amr_cuda_tests
 
-  # --------------------------------------------------------- Python ------------
-  python:
-    needs: lint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-      - run: pip install -r python/requirements.txt pytest
-      - name: Python reference tests
-        working-directory: python
-        run: pytest -v tests.py test_balance.py
-
   # ------------------------------------------- GPU runtime (self-hosted) -------
   # Optional: runs only if a self-hosted runner with the `gpu` label is online
   # (e.g. the project's A2000). Never blocks PRs from forks.
