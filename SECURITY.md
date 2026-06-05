@@ -10,7 +10,7 @@ Please **do not** open a public issue for a security problem.
 
 - Preferred: open a [private security advisory](https://github.com/nikbott/amr/security/advisories/new)
   via GitHub.
-- Or email the maintainer at **the maintainer (via GitHub)** with a description,
+- Or contact the maintainer (**@nikbott**) through GitHub with a description,
   reproduction steps, and the affected commit.
 
 We aim to acknowledge within a week. Because this is a small research project,
