@@ -36,18 +36,24 @@ jobs:
         run: |
           set -e
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-            FROM="origin/${{ github.base_ref }}"
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            # merge-base, not the base tip: lints exactly this PR's changes even
+            # if the base branch has moved ahead.
+            FROM="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
           else
             FROM="${{ github.event.before }}"
           fi
-          if [ -z "$FROM" ] || [ "$FROM" = "0000000000000000000000000000000000000000" ] \
-             || ! git cat-file -e "$FROM^{commit}" 2>/dev/null; then
-            echo "No usable base ref — linting all files."
-            pre-commit run --all-files --show-diff-on-failure
-          else
+          # Only lint incrementally when FROM is a real ancestor of HEAD. After a
+          # force-push / history rewrite the old 'before' SHA is orphaned (not an
+          # ancestor); there's no meaningful incremental base, so skip rather than
+          # fall back to --all-files (which would reformat the whole existing tree).
+          if [ -n "$FROM" ] && [ "$FROM" != "0000000000000000000000000000000000000000" ] \
+             && git merge-base --is-ancestor "$FROM" HEAD 2>/dev/null; then
             echo "Linting files changed in $FROM..HEAD"
             pre-commit run --from-ref "$FROM" --to-ref HEAD --show-diff-on-failure
+          else
+            echo "No usable incremental base (new branch or force-push) — skipping incremental lint."
+            echo "Pull requests always lint against their merge-base, so new work is still covered."
           fi
 
   # ----------------------------------------------------- CPU build + test ------
