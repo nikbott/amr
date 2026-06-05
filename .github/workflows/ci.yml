@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, cpp-sequential]
+    branches: [main, dev]
   pull_request:
   workflow_dispatch:
 
@@ -22,18 +22,33 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need history to diff against the base ref
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-      - name: Install clang-format / cmake-format
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format-17
-          sudo ln -sf "$(command -v clang-format-17)" /usr/local/bin/clang-format
       - run: pip install pre-commit
-      - name: pre-commit (all files)
-        run: pre-commit run --all-files --show-diff-on-failure
+      # clang-format / cmake-format come pinned from their pre-commit mirrors,
+      # so no apt install is needed. Lint only the files this PR/push changed,
+      # so the existing tree is not retroactively reformatted; new work must
+      # still satisfy every hook.
+      - name: pre-commit (changed files)
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            FROM="origin/${{ github.base_ref }}"
+          else
+            FROM="${{ github.event.before }}"
+          fi
+          if [ -z "$FROM" ] || [ "$FROM" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "$FROM^{commit}" 2>/dev/null; then
+            echo "No usable base ref — linting all files."
+            pre-commit run --all-files --show-diff-on-failure
+          else
+            echo "Linting files changed in $FROM..HEAD"
+            pre-commit run --from-ref "$FROM" --to-ref HEAD --show-diff-on-failure
+          fi
 
   # ----------------------------------------------------- CPU build + test ------
   cpu:
