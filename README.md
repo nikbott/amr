@@ -9,12 +9,11 @@ of [CDK2019]; see [REFERENCES.md](REFERENCES.md).
 
 ## Backends
 
-Four implementations share the same algorithm and the same Morton core, each
+Three implementations share the same algorithm and the same Morton core, each
 in its own directory:
 
 | Dir       | Backend            | Parallelism            | Build            | Tests                          |
 |-----------|--------------------|------------------------|------------------|--------------------------------|
-| `python/` | reference          | none (Numba optional)  | —                | `unittest` (Numba/GPU subset)  |
 | `omp/`    | shared-memory C++  | OpenMP                 | CMake or `g++`   | Catch2 (`omp/tests.cpp`)       |
 | `mpi/`    | distributed C++    | MPI (+OpenMP per rank) | `mpi/Makefile`   | Catch2 (`mpi/tests.cpp`)       |
 | `cuda/`   | single-GPU         | CUDA + Thrust          | `cuda/Makefile`  | custom harness (`cuda/tests.cu`)|
@@ -68,15 +67,6 @@ cd cuda && make ARCH=sm_80   # set ARCH to your GPU; default sm_70
 > `cuda/Makefile`). The code compiles and links without a GPU; running needs a
 > driver whose version matches the CUDA runtime.
 
-### Python reference (`python/`)
-
-```bash
-cd python && python3 -m unittest tests.py   # full suite needs numba (+GPU)
-```
-
-The pure-Python `Quadtree`/`Octree` in `tree.py` are the parity oracle for the
-C++ backends and run without Numba.
-
 ## Benchmarks & docs
 
 - `benchmarks/` — scripts, historical data, and the Colab notebook (see its
@@ -92,7 +82,6 @@ C++ backends and run without Numba.
 - OpenMP: 50038 assertions / 8 cases pass.
 - MPI: full suite passes at 1/2/4 ranks (50038 assertions).
 - CUDA: compiles and links clean (runtime needs a working GPU).
-- Python reference: Morton round-trip + refine/balance invariants pass.
 
 ### OpenMP strong scaling (sample)
 
