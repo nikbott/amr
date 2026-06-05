@@ -1,0 +1,30 @@
+name: Research task
+description: An experiment, validation, or open question for the paper / coupling.
+labels: ["type:research"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question / hypothesis
+      description: What are we trying to find out or establish?
+    validations:
+      required: true
+  - type: textarea
+    id: method
+    attributes:
+      label: Method
+      description: Experiment design, fixtures, backends, what gets measured.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      description: What result/figure/decision closes this? Where does it land (docs/paper)?
+    validations:
+      required: true
+  - type: input
+    id: refs
+    attributes:
+      label: Literature
+      description: Relevant REFERENCES.md keys.
