@@ -7,6 +7,9 @@ coarsening operate on that array. The design follows the p4est/t8code family
 ([BurstWG2011], [Holke2018]) and the non-conforming-AMR constraint framework
 of [CDK2019]; see [REFERENCES.md](REFERENCES.md).
 
+📖 **New here? Start with [docs/](docs/)** — [getting started](docs/getting-started.md),
+how-tos, and design notes.
+
 ## Backends
 
 Three implementations share the same algorithm and the same Morton core, each
