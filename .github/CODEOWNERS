@@ -1,0 +1,12 @@
+# Default owner for everything in the repo.
+*       @nikbott
+
+# Backends — flag the maintainer on changes to the compute cores.
+/omp/   @nikbott
+/mpi/   @nikbott
+/cuda/  @nikbott
+/common/ @nikbott
+
+# Build, CI, and release plumbing.
+/.github/        @nikbott
+/CMakeLists.txt  @nikbott
