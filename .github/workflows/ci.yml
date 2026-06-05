@@ -70,7 +70,9 @@ jobs:
       - name: Install toolchain (OpenMP + MPI + Catch2)
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libomp-dev \
+          # libomp-17-dev provides the LLVM OpenMP runtime so CMake's FindOpenMP
+          # succeeds for clang-17 (gcc uses libgomp from libomp-dev/gcc itself).
+          sudo apt-get install -y cmake ninja-build libomp-dev libomp-17-dev \
             openmpi-bin libopenmpi-dev catch2 ccache
       - uses: actions/cache@v4
         with:
