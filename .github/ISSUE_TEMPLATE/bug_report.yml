@@ -1,0 +1,33 @@
+name: Bug report
+description: A backend produces a wrong mesh, crashes, or violates an invariant.
+labels: ["type:bug"]
+body:
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      options: [omp, mpi, cuda, common/mesh-io, build/cmake, other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Expected vs actual. Which invariant broke (sorted/unique/2:1/volume)?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Commands, config (dim, max_level, oracle), rank/thread count.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / environment
+      description: git SHA, compiler + version, CUDA/MPI version if relevant.
+    validations:
+      required: true

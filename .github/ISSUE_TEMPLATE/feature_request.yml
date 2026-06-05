@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a new capability (oracle, backend optimization, I/O format, …).
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What can't be done today, and why does it matter (paper / coupling)?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Sketch the design. Cite literature keys (REFERENCES.md) if relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [omp, mpi, cuda, oracle/refinement, mesh-io, build/ci, docs]
+    validations:
+      required: true
