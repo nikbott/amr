@@ -172,6 +172,15 @@ if(AMR_BUILD_CUDA)
     target_compile_options(amr_cuda PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
 
+    # Active-front vs reference balance() benchmark (cuda/bench.cu).
+    add_executable(amr_cuda_bench cuda/bench.cu)
+    set_target_properties(amr_cuda_bench PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED ON
+        CUDA_ARCHITECTURES "${AMR_CUDA_ARCHITECTURES}")
+    target_compile_options(amr_cuda_bench PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
+
     if(BUILD_TESTING)
         # cuda/tests.cu uses a self-contained CHECK/REQUIRE harness (no Catch2).
         add_executable(amr_cuda_tests cuda/tests.cu)
