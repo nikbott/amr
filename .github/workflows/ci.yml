@@ -21,10 +21,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0   # need history to diff against the base ref
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - run: pip install pre-commit
@@ -74,13 +74,13 @@ jobs:
       CC: ${{ matrix.compiler.cc }}
       CXX: ${{ matrix.compiler.cxx }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install toolchain (OpenMP + MPI + Catch2)
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libomp-dev \
             openmpi-bin libopenmpi-dev catch2 ccache
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/ccache
           key: ccache-${{ matrix.compiler.cxx }}-${{ matrix.build_type }}-${{ github.sha }}
@@ -101,7 +101,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
       - name: Upload ctest log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ctest-${{ matrix.compiler.cxx }}-${{ matrix.build_type }}
           path: build/Testing/Temporary/LastTest.log
@@ -115,9 +115,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install CUDA toolkit
-        uses: Jimver/cuda-toolkit@v0.2.19
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: '12.5.0'
           method: network
@@ -140,7 +140,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build + run CUDA tests and balance benchmark
         run: |
           make -C cuda ARCH=sm_86
