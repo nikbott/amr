@@ -25,8 +25,8 @@ The canonical parallel construction + **minimal 2:1 balance** of linear
 Morton octrees via the *insulation-layer* property (no octant outside the 3^d
 envelope can force a split). Output is the *coarsest* (minimal) balanced
 octree; execution is iterative but bounded. Reference implementation = Dendro
-(`github.com/paralab/Dendro-5.01`). See `docs/gpu-balance-notes.md` for how the
-balance kernels here relate to it.
+(`github.com/paralab/Dendro-5.01`). See `docs/design/gpu-balance-notes.md` for how
+the balance kernels here relate to it.
 
 **[IBG2012]** T. Isaac, C. Burstedde, O. Ghattas.
 *Low-Cost Parallel Algorithms for 2:1 Octree Balance.*
@@ -37,7 +37,7 @@ The **GPU-amenable balance algorithm** we target: *octant preclusion* + the
 balance reduces to sort + binary-search + compaction + `Complete` instead of a
 per-pass ripple. `Reduce` (Fig. 8), generate-coarse-neighbourhood + `Linearize`
 (Fig. 6), and the preclusion variant (Fig. 7) are transcribed in
-`docs/gpu-balance-notes.md`.
+`docs/design/gpu-balance-notes.md`.
 
 **[IBWG2015]** T. Isaac, C. Burstedde, L. C. Wilcox, O. Ghattas.
 *Recursive Algorithms for Distributed Forests of Octrees.*
@@ -51,7 +51,7 @@ exchange (Stage 2 tuning) and the multi-GPU halo path.
 **[Holke2018]** J. Holke. *Scalable algorithms for parallel tree-based adaptive
 mesh refinement with general element types.* PhD thesis, Univ. of Bonn (2018).
 Later: J. Holke et al., *t8code v1.0*, J. Open Source Softw. (2024).
-Vendored at `~/Documents/ic/code/t8code/`.
+Vendored in the adaptive-dic repo at `t8code/`.
 
 Generalization of p4est to mixed element types via a "scheme" abstraction.
 Reference implementation for the cross-backend parity tests; the algorithm
@@ -60,8 +60,7 @@ API. Used for validating correctness of new partitioning strategies.
 
 **[CDK2019]** J. Červený, V. Dobrev, T. Kolev.
 *Non-Conforming Mesh Refinement for High-Order Finite Elements.*
-arXiv:1905.04033 (2019). LLNL-JRNL-751849.
-PDF: `~/Documents/ic/refs/Non-Conforming Mesh Refinement For High-Order Finite Elements.pdf`.
+arXiv:[1905.04033](https://arxiv.org/abs/1905.04033) (2019). LLNL-JRNL-751849.
 
 Algebraic-constraint approach (variational restriction) for non-conforming
 elements with hanging nodes — the foundation for the upcoming `common/oracle_scalar_field.hpp`
@@ -112,7 +111,7 @@ For `cuda/*` kernels (cooperative groups, async copy, persistent kernels).
 
 ## DIC-side cross-reference
 
-See `code/REFERENCES.md` (`~/Documents/ic/code/REFERENCES.md`) for the parallel
+See the adaptive-dic `REFERENCES.md` for the parallel
 DIC references: `[Sciuti2021]` (the MATLAB driver), `[ZZ1987]` (the error
 estimator wrapped by the `ScalarFieldOracle`), `[HildRoux2006]`, `[Mathieu2015]`.
 

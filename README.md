@@ -17,9 +17,9 @@ in its own directory:
 
 | Dir       | Backend            | Parallelism            | Build            | Tests                          |
 |-----------|--------------------|------------------------|------------------|--------------------------------|
-| `omp/`    | shared-memory C++  | OpenMP                 | CMake or `g++`   | Catch2 (`omp/tests.cpp`)       |
-| `mpi/`    | distributed C++    | MPI (+OpenMP per rank) | `mpi/Makefile`   | Catch2 (`mpi/tests.cpp`)       |
-| `cuda/`   | single-GPU         | CUDA + Thrust          | `cuda/Makefile`  | custom harness (`cuda/tests.cu`)|
+| `omp/`    | shared-memory C++  | OpenMP                 | CMake or `g++`             | Catch2 (`omp/tests.cpp`)       |
+| `mpi/`    | distributed C++    | MPI (+OpenMP per rank) | CMake (`-DAMR_BUILD_MPI=ON`)  | Catch2 (`mpi/tests.cpp`)       |
+| `cuda/`   | single-GPU         | CUDA + Thrust          | CMake (`-DAMR_BUILD_CUDA=ON`) | custom harness (`cuda/tests.cu`)|
 
 Each C++ backend has the same module layout: `core` (Morton + strong types),
 `tree` (refine/balance/coarsen), `physics` (oracles), `viz` (SVG/VTK), plus
@@ -51,24 +51,25 @@ OMP_NUM_THREADS=8 g++ -std=c++20 -O2 -fopenmp -Iomp omp/main.cpp -o omp/amr && o
 ### MPI (`mpi/`)
 
 ```bash
-cd mpi && make            # needs mpicxx + system Catch2
-mpirun -np 4 ./test
-mpirun -np 4 ./amr
+cmake -S . -B build -DAMR_BUILD_MPI=ON && cmake --build build
+mpirun -np 4 ./build/amr_mpi_tests
+mpirun -np 4 ./build/amr_mpi
 ```
 
 > In containers / sandboxes where the shared-memory transport stalls, force
-> TCP: `mpirun --mca btl tcp,self -np 4 ./test`.
+> TCP: `mpirun --mca btl tcp,self -np 4 ./build/amr_mpi_tests`.
 
 ### CUDA (`cuda/`)
 
 ```bash
-cd cuda && make ARCH=sm_80   # set ARCH to your GPU; default sm_70
-./amr        # needs a working CUDA driver matching the runtime
+# set the arch to your GPU (default sm_70 → AMR_CUDA_ARCHITECTURES=70):
+cmake -S . -B build -DAMR_BUILD_CUDA=ON -DAMR_CUDA_ARCHITECTURES=80 && cmake --build build
+./build/amr_cuda   # needs a working CUDA driver matching the runtime
 ```
 
-> The Thrust device lambdas require nvcc's `--extended-lambda` (already in
-> `cuda/Makefile`). The code compiles and links without a GPU; running needs a
-> driver whose version matches the CUDA runtime.
+> The Thrust device lambdas require nvcc's `--extended-lambda`, which CMake sets
+> automatically for the CUDA targets. The code compiles and links without a GPU;
+> running needs a driver whose version matches the CUDA runtime.
 
 ## Benchmarks & docs
 
@@ -103,3 +104,7 @@ count (parallel determinism). Full data: `benchmarks/results/omp_scaling_restruc
 
 Proper strong/weak-scaling sweeps (parametrized sizes, MPI ranks, GPU) are
 produced by the Stage-2 SLURM harness, not this fixed demo.
+
+## License
+
+BSD 3-Clause — see [LICENSE](LICENSE).
