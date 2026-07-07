@@ -30,8 +30,12 @@ class, no registration. See `omp/physics.hpp` for the built-in `CircleOracle`
 2. **Use it** where the tree is built (`omp/main.cpp`):
 
    ```cpp
-   tree.refine(MyOracle{cfg}, max_level);
+   tree.refine(MyOracle{cfg});   // one pass; the tree passes max_level to the oracle
    ```
+
+   `refine()` runs a single level-pass and returns `true` while it still split
+   something, so drive it in a loop (`while (tree.refine(MyOracle{cfg})) {}`) to
+   refine to convergence.
 
 3. **Test it** — add a Catch2 case in `omp/tests.cpp` asserting the expected
    leaf set / invariants on a small fixture.

@@ -1,6 +1,5 @@
 # amr/Makefile — canonical entry points for local development.
-# Mirror of what CI will run; designed so wiring CI later is one job per target.
-# See docs/CI_FUTURE.md for the GitHub Actions / GitLab CI mapping.
+# Mirrors what CI runs; each target maps onto a job in .github/workflows/ci.yml.
 
 SHELL          := /usr/bin/env bash
 BUILD_DIR      ?= build
@@ -8,7 +7,8 @@ BUILD_TYPE     ?= Debug
 CMAKE_ARGS     ?=
 JOBS           ?= $(shell nproc)
 
-# Optional features (default off so a bare `make build` works)
+# Optional features. MPI + sanitizers default ON (mirrors the Debug CI job);
+# CUDA defaults OFF (needs nvcc). Override per-invocation, e.g. `make build WITH_MPI=OFF`.
 WITH_MPI       ?= ON
 WITH_CUDA      ?= OFF
 WITH_SANITIZE  ?= ON
