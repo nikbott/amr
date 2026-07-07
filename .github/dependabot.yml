@@ -10,10 +10,3 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-  # Keep the Python reference-implementation deps current.
-  - package-ecosystem: pip
-    directory: "/python"
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: chore
