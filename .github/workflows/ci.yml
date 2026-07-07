@@ -62,11 +62,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # clang-17 temporarily dropped: its OpenMP runtime isn't discoverable
-        # with the stock noble libomp on the runner (see issue). gcc-13 with
-        # sanitizers is the supported CI compiler. Re-add clang once fixed.
+        # Two-compiler coverage. clang's LLVM OpenMP runtime (libomp-17-dev) is
+        # installed only in the clang jobs (see step below) so a clang-specific
+        # package never blocks the gcc jobs' apt install.
         compiler:
           - { cc: gcc-13, cxx: g++-13 }
+          - { cc: clang-17, cxx: clang++-17 }
         build_type: [Debug, Release]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -80,6 +81,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libomp-dev \
             openmpi-bin libopenmpi-dev catch2 ccache
+      # clang needs the matching LLVM OpenMP runtime for CMake's FindOpenMP.
+      # Scoped to clang jobs so this package can't break the gcc matrix entry.
+      - name: Install clang OpenMP runtime
+        if: startsWith(matrix.compiler.cc, 'clang')
+        run: sudo apt-get install -y clang-17 libomp-17-dev
       - uses: actions/cache@v5
         with:
           path: ~/.cache/ccache
