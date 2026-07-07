@@ -74,7 +74,6 @@ int main(int argc, char** argv) {
                       << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
                       << "ms. Final size: " << tree.global_size() << "\n";
         }
-        // viz::write_vtk(tree, "mesh_3d_rank_" + std::to_string(mpi.rank) + ".vtk");
     }
     return 0;
 }
