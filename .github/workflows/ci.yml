@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # need history to diff against the base ref
       - uses: actions/setup-python@v6
@@ -75,7 +75,7 @@ jobs:
       CC: ${{ matrix.compiler.cc }}
       CXX: ${{ matrix.compiler.cxx }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install toolchain (OpenMP + MPI + Catch2)
         run: |
           sudo apt-get update
@@ -86,7 +86,7 @@ jobs:
       - name: Install clang OpenMP runtime
         if: startsWith(matrix.compiler.cc, 'clang')
         run: sudo apt-get install -y clang-17 libomp-17-dev
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
           key: ccache-${{ matrix.compiler.cxx }}-${{ matrix.build_type }}-${{ github.sha }}
@@ -121,7 +121,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install CUDA toolkit
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
@@ -147,7 +147,7 @@ jobs:
     runs-on: [self-hosted, linux, gpu]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build + run CUDA tests and balance benchmark (needs a GPU)
         run: |
           cmake -B build-gpu -DCMAKE_BUILD_TYPE=Release \
