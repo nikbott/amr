@@ -137,18 +137,21 @@ jobs:
           cmake --build build-cuda --target amr_cuda amr_cuda_tests
 
   # ------------------------------------------- GPU runtime (self-hosted) -------
-  # Optional: runs only if a self-hosted runner with the `gpu` label is online
-  # (e.g. the project's A2000). Never blocks PRs from forks.
+  # Opt-in: manual `workflow_dispatch` only, run when the self-hosted GPU runner
+  # (the project's A2000, `gpu` label) is online. Deliberately NOT triggered on
+  # push/PR: with no runner online a self-hosted job sits `queued` indefinitely
+  # and stalls the whole run, so GPU runtime validation is on-demand instead.
   gpu:
     needs: cuda-build
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: [self-hosted, linux, gpu]
     timeout-minutes: 30
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
-      - name: Build + run CUDA tests and balance benchmark
+      - name: Build + run CUDA tests and balance benchmark (needs a GPU)
         run: |
-          make -C cuda ARCH=sm_86
-          ./cuda/test
-          ./cuda/bench
+          cmake -B build-gpu -DCMAKE_BUILD_TYPE=Release \
+            -DAMR_BUILD_CUDA=ON -DAMR_CUDA_ARCHITECTURES=86 -DBUILD_TESTING=ON
+          cmake --build build-gpu --parallel --target amr_cuda_tests amr_cuda_bench
+          ./build-gpu/amr_cuda_tests
+          ./build-gpu/amr_cuda_bench
