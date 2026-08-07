@@ -39,11 +39,30 @@ using namespace Catch::Matchers;
  */
 template <int DIM>
 int count_balance_violations(const LinearTree<DIM>& tree) {
+    // Full 2:1 balance: probe the 12 edge diagonals too, or edge violations go
+    // uncounted (the whole point of full balance for the DIC bridge).
     std::vector<std::array<int, DIM>> dirs;
     if constexpr (DIM == 2)
         dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
     else
-        dirs = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        dirs = {{1, 0, 0},
+                {-1, 0, 0},
+                {0, 1, 0},
+                {0, -1, 0},
+                {0, 0, 1},
+                {0, 0, -1},
+                {1, 1, 0},
+                {1, -1, 0},
+                {-1, 1, 0},
+                {-1, -1, 0},
+                {1, 0, 1},
+                {1, 0, -1},
+                {-1, 0, 1},
+                {-1, 0, -1},
+                {0, 1, 1},
+                {0, 1, -1},
+                {0, -1, 1},
+                {0, -1, -1}};
 
     int violations = 0;
     int missing_neighbors = 0;  // New: Track holes
@@ -328,6 +347,36 @@ TEMPLATE_TEST_CASE("2:1 Balance & Ripple Algorithm (Holke §3.3)", "[balance]", 
         int violations = count_balance_violations(tree);
         REQUIRE(violations == 0);
     }
+}
+
+TEST_CASE("Full 2:1 balance resolves 3D edge-diagonal jumps", "[balance][edge]") {
+    // Regression for the AMR<->DIC bridge (code/+mesh/importFromAmr.m). Face-only
+    // balance leaves an edge-diagonal 2-level jump -- a coarse cell sharing only an
+    // EDGE with cells two levels finer -- which drops a node at the coarse edge's
+    // quarter point, inexpressible as a two-parent midpoint constraint. Refine the
+    // octant [4,8]x[4,8]x[0,4] of an [0,8]^3 domain to level 3; the level-1 corner
+    // cell [0,4]^3 then sits edge-diagonal to level-3 cells with no level-3 FACE
+    // neighbour, so face-only balance leaves it untouched. Full balance must not.
+    Octree tree(3);
+    auto oracle = [&](const Node& n, int) {
+        if (n.level >= 3)
+            return false;
+        auto c = tree.decode(n.code);
+        uint64_t size = 1ULL << (3 - n.level);
+        bool ix = c[0].value < 8 && c[0].value + size > 4;
+        bool iy = c[1].value < 8 && c[1].value + size > 4;
+        bool iz = c[2].value < 4;  // z in [0,4)
+        return ix && iy && iz;
+    };
+    while (tree.refine(oracle))
+        ;
+
+    // The fixture genuinely contains the edge violation (guards against a vacuous
+    // test if the oracle geometry ever drifts): face-only balance would leave it.
+    REQUIRE(count_balance_violations(tree) > 0);
+    tree.balance();
+    tree.verify();
+    REQUIRE(count_balance_violations(tree) == 0);
 }
 
 TEMPLATE_TEST_CASE("Active-front balance parity (byte-identical vs balance_ref)",

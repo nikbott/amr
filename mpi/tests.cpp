@@ -38,11 +38,30 @@ using namespace Catch::Matchers;
  */
 template <int DIM>
 int count_balance_violations(const DistributedTree<DIM>& tree) {
+    // Full 2:1 balance: probe the 12 edge diagonals too, or edge violations go
+    // uncounted (the whole point of full balance for the DIC bridge).
     std::vector<std::array<int, DIM>> dirs;
     if constexpr (DIM == 2)
         dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
     else
-        dirs = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        dirs = {{1, 0, 0},
+                {-1, 0, 0},
+                {0, 1, 0},
+                {0, -1, 0},
+                {0, 0, 1},
+                {0, 0, -1},
+                {1, 1, 0},
+                {1, -1, 0},
+                {-1, 1, 0},
+                {-1, -1, 0},
+                {1, 0, 1},
+                {1, 0, -1},
+                {-1, 0, 1},
+                {-1, 0, -1},
+                {0, 1, 1},
+                {0, 1, -1},
+                {0, -1, 1},
+                {0, -1, -1}};
 
     int violations = 0;
     int missing_neighbors = 0;  // New: Track holes in the domain

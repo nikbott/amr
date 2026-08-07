@@ -48,9 +48,27 @@ int count_balance_violations(const std::vector<uint64_t>& codes,
     // Domain width in integer coords
     uint64_t width = 1ULL << max_lvl;
 
-    // Geometric Directions
-    int dirs[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-    int num_dirs = (DIM == 2) ? 4 : 6;
+    // Geometric Directions -- full 2:1 balance: 6 face + 12 edge in 3D, so edge
+    // violations are actually counted. 2D uses the first 4 (edge-complete).
+    int dirs[18][3] = {{1, 0, 0},
+                       {-1, 0, 0},
+                       {0, 1, 0},
+                       {0, -1, 0},
+                       {0, 0, 1},
+                       {0, 0, -1},
+                       {1, 1, 0},
+                       {1, -1, 0},
+                       {-1, 1, 0},
+                       {-1, -1, 0},
+                       {1, 0, 1},
+                       {1, 0, -1},
+                       {-1, 0, 1},
+                       {-1, 0, -1},
+                       {0, 1, 1},
+                       {0, 1, -1},
+                       {0, -1, 1},
+                       {0, -1, -1}};
+    int num_dirs = (DIM == 2) ? 4 : 18;
 
     for (int i = 0; i < n; ++i) {
         uint64_t code = codes[i];

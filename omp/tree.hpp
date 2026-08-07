@@ -433,11 +433,34 @@ public:
     void balance() {
         last_balance_iters = 0;
         constexpr int siblings = 1 << DIM;
+        // Full 2:1 balance. Face neighbours alone leave, in 3D, edge-diagonal
+        // 2-level jumps: a node then lands at a coarse edge's quarter point,
+        // which the T3/T4 DIC bridge (code/+mesh/importFromAmr.m) cannot express
+        // as a two-parent midpoint constraint. Balancing the 12 edge directions
+        // too keeps every shared edge within one level. 2D is already
+        // edge-complete -- its 4 "face" dirs are all of a quad's edge neighbours.
         std::vector<std::array<int, DIM>> dirs;
         if constexpr (DIM == 2)
             dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         else
-            dirs = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            dirs = {{1, 0, 0},
+                    {-1, 0, 0},
+                    {0, 1, 0},
+                    {0, -1, 0},
+                    {0, 0, 1},
+                    {0, 0, -1},
+                    {1, 1, 0},
+                    {1, -1, 0},
+                    {-1, 1, 0},
+                    {-1, -1, 0},
+                    {1, 0, 1},
+                    {1, 0, -1},
+                    {-1, 0, 1},
+                    {-1, 0, -1},
+                    {0, 1, 1},
+                    {0, 1, -1},
+                    {0, -1, 1},
+                    {0, -1, -1}};
 
         std::vector<uint8_t> dirty(leaf_codes.size(), 1);  // pass 1: every leaf
         std::vector<uint8_t> child_mask, dirty_next;
@@ -558,11 +581,34 @@ public:
      */
     void balance_ref() {
         last_balance_iters = 0;
+        // Full 2:1 balance. Face neighbours alone leave, in 3D, edge-diagonal
+        // 2-level jumps: a node then lands at a coarse edge's quarter point,
+        // which the T3/T4 DIC bridge (code/+mesh/importFromAmr.m) cannot express
+        // as a two-parent midpoint constraint. Balancing the 12 edge directions
+        // too keeps every shared edge within one level. 2D is already
+        // edge-complete -- its 4 "face" dirs are all of a quad's edge neighbours.
         std::vector<std::array<int, DIM>> dirs;
         if constexpr (DIM == 2)
             dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         else
-            dirs = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            dirs = {{1, 0, 0},
+                    {-1, 0, 0},
+                    {0, 1, 0},
+                    {0, -1, 0},
+                    {0, 0, 1},
+                    {0, 0, -1},
+                    {1, 1, 0},
+                    {1, -1, 0},
+                    {-1, 1, 0},
+                    {-1, -1, 0},
+                    {1, 0, 1},
+                    {1, 0, -1},
+                    {-1, 0, 1},
+                    {-1, 0, -1},
+                    {0, 1, 1},
+                    {0, 1, -1},
+                    {0, -1, 1},
+                    {0, -1, -1}};
 
         while (true) {
             size_t n = leaf_codes.size();

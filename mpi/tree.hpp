@@ -265,11 +265,31 @@ public:
     }
 
     void balance() {
+        // Full 2:1 balance -- 6 face + 12 edge directions in 3D so every shared
+        // edge is within one level, matching omp/tree.hpp. See there for why the
+        // DIC bridge needs edge completeness; 2D is already edge-complete.
         std::vector<std::array<int, DIM>> dirs;
         if constexpr (DIM == 2)
             dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         else
-            dirs = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            dirs = {{1, 0, 0},
+                    {-1, 0, 0},
+                    {0, 1, 0},
+                    {0, -1, 0},
+                    {0, 0, 1},
+                    {0, 0, -1},
+                    {1, 1, 0},
+                    {1, -1, 0},
+                    {-1, 1, 0},
+                    {-1, -1, 0},
+                    {1, 0, 1},
+                    {1, 0, -1},
+                    {-1, 0, 1},
+                    {-1, 0, -1},
+                    {0, 1, 1},
+                    {0, 1, -1},
+                    {0, -1, 1},
+                    {0, -1, -1}};
         while (true) {
             update_partition_map();
             fetch_ghosts();
@@ -463,11 +483,31 @@ private:
     void fetch_ghosts() {
         ghost_nodes.clear();
         std::vector<Node> needed;
+        // Must match balance()'s stencil: edge-diagonal neighbours can live on
+        // another rank, so we fetch ghosts along all 12 edge directions too --
+        // otherwise balance() cannot see a cross-rank edge neighbour to correct.
         std::vector<std::array<int, DIM>> dirs;
         if constexpr (DIM == 2)
             dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         else
-            dirs = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            dirs = {{1, 0, 0},
+                    {-1, 0, 0},
+                    {0, 1, 0},
+                    {0, -1, 0},
+                    {0, 0, 1},
+                    {0, 0, -1},
+                    {1, 1, 0},
+                    {1, -1, 0},
+                    {-1, 1, 0},
+                    {-1, -1, 0},
+                    {1, 0, 1},
+                    {1, 0, -1},
+                    {-1, 0, 1},
+                    {-1, 0, -1},
+                    {0, 1, 1},
+                    {0, 1, -1},
+                    {0, -1, 1},
+                    {0, -1, -1}};
         uint64_t my_start = leaf_codes.empty() ? 0 : leaf_codes.front();
         uint64_t my_end =
             leaf_codes.empty()

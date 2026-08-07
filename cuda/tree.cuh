@@ -261,8 +261,27 @@ __global__ void k_check_balance(const uint64_t* codes,
     uint64_t my_code = codes[idx];
     int my_lvl = levels[idx];
 
-    int dirs[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-    int num_dirs = (DIM == 2) ? 4 : 6;
+    // Full 2:1 balance: 6 face + 12 edge dirs in 3D (see omp/tree.hpp). 2D uses
+    // the first 4 (its face dirs), which are already edge-complete for a quad.
+    int dirs[18][3] = {{1, 0, 0},
+                       {-1, 0, 0},
+                       {0, 1, 0},
+                       {0, -1, 0},
+                       {0, 0, 1},
+                       {0, 0, -1},
+                       {1, 1, 0},
+                       {1, -1, 0},
+                       {-1, 1, 0},
+                       {-1, -1, 0},
+                       {1, 0, 1},
+                       {1, 0, -1},
+                       {-1, 0, 1},
+                       {-1, 0, -1},
+                       {0, 1, 1},
+                       {0, 1, -1},
+                       {0, -1, 1},
+                       {0, -1, -1}};
+    int num_dirs = (DIM == 2) ? 4 : 18;
 
     for (int d = 0; d < num_dirs; ++d) {
         uint64_t n_code = get_neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
@@ -340,8 +359,27 @@ __global__ void k_check_balance_active(const uint64_t* codes,
     uint64_t my_code = codes[idx];
     int my_lvl = levels[idx];
 
-    int dirs[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-    int num_dirs = (DIM == 2) ? 4 : 6;
+    // Full 2:1 balance: 6 face + 12 edge dirs in 3D (see omp/tree.hpp). 2D uses
+    // the first 4 (its face dirs), which are already edge-complete for a quad.
+    int dirs[18][3] = {{1, 0, 0},
+                       {-1, 0, 0},
+                       {0, 1, 0},
+                       {0, -1, 0},
+                       {0, 0, 1},
+                       {0, 0, -1},
+                       {1, 1, 0},
+                       {1, -1, 0},
+                       {-1, 1, 0},
+                       {-1, -1, 0},
+                       {1, 0, 1},
+                       {1, 0, -1},
+                       {-1, 0, 1},
+                       {-1, 0, -1},
+                       {0, 1, 1},
+                       {0, 1, -1},
+                       {0, -1, 1},
+                       {0, -1, -1}};
+    int num_dirs = (DIM == 2) ? 4 : 18;
 
     for (int d = 0; d < num_dirs; ++d) {
         uint64_t n_code = get_neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
@@ -419,8 +457,27 @@ __global__ void k_mark_child_neighbors(const uint64_t* codes,
     int my_lvl = levels[idx];
     uint64_t my_size = 1ULL << ((uint64_t)(max_level - my_lvl) * DIM);
 
-    int dirs[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-    int num_dirs = (DIM == 2) ? 4 : 6;
+    // Full 2:1 balance: 6 face + 12 edge dirs in 3D (see omp/tree.hpp). 2D uses
+    // the first 4 (its face dirs), which are already edge-complete for a quad.
+    int dirs[18][3] = {{1, 0, 0},
+                       {-1, 0, 0},
+                       {0, 1, 0},
+                       {0, -1, 0},
+                       {0, 0, 1},
+                       {0, 0, -1},
+                       {1, 1, 0},
+                       {1, -1, 0},
+                       {-1, 1, 0},
+                       {-1, -1, 0},
+                       {1, 0, 1},
+                       {1, 0, -1},
+                       {-1, 0, 1},
+                       {-1, 0, -1},
+                       {0, 1, 1},
+                       {0, 1, -1},
+                       {0, -1, 1},
+                       {0, -1, -1}};
+    int num_dirs = (DIM == 2) ? 4 : 18;
 
     for (int d = 0; d < num_dirs; ++d) {
         uint64_t n_code = get_neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
