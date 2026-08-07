@@ -1,57 +1,56 @@
 /**
  * @file viz.hpp
- * @brief Visualization utilities.
+ * @brief MPI-backend adapter over the shared writers in common/viz.hpp.
+ *
+ * Each rank writes only the leaves it owns, so callers pass a rank-qualified
+ * filename and the per-rank files are assembled by the viewer.
  */
 #pragma once
-#include "tree.hpp"
-#include <fstream>
+#include <cstdint>
 #include <string>
-#include <iostream>
 #include <tuple>
+#include <vector>
+
+#include "../common/viz.hpp"
+#include "tree.hpp"
 
 namespace amr::viz {
 
+namespace detail {
+
+/// Flatten a DistributedTree's *local* leaves into the arrays the writers take.
+template <typename Tree>
+struct HostLeaves {
+    std::vector<uint64_t> codes;
+    std::vector<uint8_t> levels;
+
+    explicit HostLeaves(const Tree& tree) {
+        codes.reserve(tree.local_size());
+        levels.reserve(tree.local_size());
+        for (const auto& node : tree) {
+            codes.push_back(node.code.value);
+            levels.push_back(static_cast<uint8_t>(node.level));
+        }
+    }
+
+    LeafView view(const Tree& tree) const {
+        constexpr int DIM = static_cast<int>(std::tuple_size_v<typename Tree::Point>);
+        return LeafView{codes.data(), levels.data(), codes.size(), tree.max_level, DIM};
+    }
+};
+
+}  // namespace detail
+
 template <typename Tree>
 void write_svg(const Tree& tree, const std::string& filename) {
-    std::ofstream f(filename);
-    f << "<svg width=\"800\" height=\"800\" viewBox=\"0 0 1000 1000\" xmlns=\"http://www.w3.org/2000/svg\">\n";
-    f << "<rect width=\"1000\" height=\"1000\" fill=\"white\"/>\n";
-    double scale = 1000.0 / static_cast<double>(tree.domain_width());
-    for (const auto& node : tree) {
-        auto coords = tree.decode(node.code);
-        double x = coords[0].value * scale;
-        double y = 1000.0 - (coords[1].value * scale); 
-        double s = (1ULL << (tree.max_level - node.level)) * scale;
-        f << "<rect x=\"" << x << "\" y=\"" << (y - s) 
-          << "\" width=\"" << s << "\" height=\"" << s 
-          << "\" fill=\"none\" stroke=\"red\" stroke-width=\"0.5\"/>\n";
-    }
-    f << "</svg>\n";
-    std::cout << "Wrote " << filename << " (" << tree.local_size() << " elements)\n";
+    const detail::HostLeaves<Tree> leaves(tree);
+    write_svg(filename, leaves.view(tree));
 }
 
 template <typename Tree>
 void write_vtk(const Tree& tree, const std::string& filename) {
-    std::ofstream f(filename);
-    f << "# vtk DataFile Version 3.0\nAMR Mesh\nASCII\nDATASET UNSTRUCTURED_GRID\n";
-    size_t n = tree.local_size();
-    f << "POINTS " << n << " double\n";
-    double norm = 1.0 / static_cast<double>(tree.domain_width());
-    for (const auto& node : tree) {
-        auto coords = tree.decode(node.code);
-        uint64_t half = (1ULL << (tree.max_level - node.level)) / 2;
-        double x = (coords[0].value + half) * norm;
-        double y = (coords[1].value + half) * norm;
-        double z = 0.0;
-        if constexpr (std::tuple_size_v<typename Tree::Point> == 3) {
-            z = (coords[2].value + half) * norm;
-        }
-        f << x << " " << y << " " << z << "\n";
-    }
-    f << "\nCELLS " << n << " " << 2*n << "\n";
-    for(size_t i=0; i<n; ++i) f << "1 " << i << "\n";
-    f << "\nCELL_TYPES " << n << "\n";
-    for(size_t i=0; i<n; ++i) f << "1\n"; 
-    std::cout << "Wrote " << filename << " (" << n << " points)\n";
+    const detail::HostLeaves<Tree> leaves(tree);
+    write_vtk(filename, leaves.view(tree));
 }
-}
+
+}  // namespace amr::viz

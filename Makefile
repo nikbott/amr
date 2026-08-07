@@ -18,7 +18,9 @@ CMAKE_FEATURE_FLAGS := \
     -DAMR_BUILD_CUDA=$(WITH_CUDA) \
     -DENABLE_SANITIZERS=$(WITH_SANITIZE)
 
-.PHONY: help lint format configure build test parity ci-local \
+RESULTS_DIR    ?= results
+
+.PHONY: help lint format configure build test parity results ci-local \
         clean distclean container-cpu container-gpu slurm-strong figs
 
 help: ## list available targets
@@ -51,6 +53,10 @@ parity: build ## cross-backend parity test (OMP ↔ MPI ↔ CUDA)
 	else \
 	    echo "[stub] parity test added in Stage 2 — skipping"; \
 	fi
+
+results: build ## emit small meshes + checks into results/ for manual inspection
+	./$(BUILD_DIR)/amr_gallery $(RESULTS_DIR)
+	@echo "open $(RESULTS_DIR)/index.html"
 
 ci-local: lint test parity ## full local verification (matches CI)
 	@echo "ci-local: green"

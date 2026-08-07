@@ -124,6 +124,13 @@ target_link_libraries(amr PRIVATE core)
 add_executable(amr_omp_bench omp/bench.cpp)
 target_link_libraries(amr_omp_bench PRIVATE core)
 
+# --- Executable: Validation gallery (small meshes for manual inspection)
+# -------
+# `make results` runs this; it writes SVG/VTK artifacts plus a pass/fail
+# summary.
+add_executable(amr_gallery omp/gallery.cpp)
+target_link_libraries(amr_gallery PRIVATE core)
+
 # --- Executable: Tests --------------------------------------------------------
 if(BUILD_TESTING)
   add_executable(amr_tests omp/tests.cpp)
