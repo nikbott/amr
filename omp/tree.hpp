@@ -283,11 +283,21 @@ public:
         for (size_t i = 0; i < size(); ++i) {
             uint64_t code = leaf_codes[i];
             int lvl = leaf_levels[i];
+            // A leaf must be at a valid level, its code aligned to that level, and
+            // inside the domain -- otherwise a set can be sorted, non-overlapping,
+            // and still sum to volume 1 while lying off-grid or past the boundary.
+            if (lvl < 0 || lvl > max_level)
+                throw std::runtime_error("Leaf level out of range");
+            const uint64_t span = 1ULL << (DIM * (max_level - lvl));
+            if (code & (span - 1))
+                throw std::runtime_error("Leaf code not aligned to its level");
+            if (DIM * max_level < 64 && code >= (1ULL << (DIM * max_level)))
+                throw std::runtime_error("Leaf code outside the domain");
             if (code < last_end)
                 throw std::runtime_error("Overlapping nodes detected");
             double vol = 1.0 / (1ULL << lvl);
             total_volume += std::pow(vol, DIM);
-            last_end = code + (1ULL << (DIM * (max_level - lvl)));
+            last_end = code + span;
         }
         if (std::abs(total_volume - 1.0) > 1e-9)
             throw std::runtime_error("Volume sum != 1.0");
