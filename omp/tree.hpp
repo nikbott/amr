@@ -214,6 +214,11 @@ public:
                 return UINT64_MAX;  // Propagate error
             if (d == 0)
                 return current;
+            // A level-0 cell spans the whole domain, so any neighbour is out of
+            // bounds. Returning here also avoids the 1<<64 shift below at the
+            // maximum level (shift_coord*DIM would reach the word width).
+            if (level == 0)
+                return UINT64_MAX;
 
             uint64_t shift_coord = max_level - level;
             uint64_t one_dilated;
@@ -231,8 +236,15 @@ public:
             }
 
             if (d > 0) {
-                // Boundary Check: If setting all 'holes' to 1 creates ALL_ONES, we overflow
-                if ((current | ~dim_mask) == UINT64_MAX)
+                // Out of the domain iff this axis already sits at its maximum
+                // aligned coordinate for this level. (The old all-ones test only
+                // fired at full resolution, so a coarser boundary cell's +neighbour
+                // wrapped -- to an out-of-range code, or to the origin when the
+                // carry ran off the top of the word -- instead of the sentinel.)
+                const uint64_t domain_mask =
+                    (DIM * max_level >= 64) ? ~0ULL : ((1ULL << (DIM * max_level)) - 1);
+                const uint64_t axis_max = (dim_mask & domain_mask) & ~(one_dilated - 1);
+                if ((current & dim_mask) == axis_max)
                     return UINT64_MAX;
 
                 uint64_t sum = (current | ~dim_mask) + one_dilated;

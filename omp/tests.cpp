@@ -243,6 +243,41 @@ TEMPLATE_TEST_CASE("Linear Tree Invariants (Burstedde §2.2)", "[tree]", Quadtre
     }
 }
 
+TEST_CASE("get_neighbor_code returns the sentinel past the +domain boundary (core)",
+          "[core][neighbor][boundary]") {
+    // 3D at the maximum supported level: a coarse boundary cell's +y/+z neighbour
+    // used to wrap to the origin (the carry ran off the top of the 64-bit word),
+    // and +x used to land above every valid code, instead of the OOB sentinel.
+    Octree tree(21);
+    const uint64_t maxc = 1ULL << 21;
+    const uint64_t step2 = 1ULL << (21 - 2);  // a level-2 cell's span per axis
+    const uint64_t hi = maxc - step2;         // max aligned level-2 coordinate
+
+    auto at = [&](uint64_t x, uint64_t y, uint64_t z) {
+        Octree::Point p{Coordinate{static_cast<uint32_t>(x)},
+                        Coordinate{static_cast<uint32_t>(y)},
+                        Coordinate{static_cast<uint32_t>(z)}};
+        return tree.encode(p);
+    };
+
+    SECTION("+x/+y/+z at the far corner are all out of bounds") {
+        MortonCode corner = at(hi, hi, hi);
+        REQUIRE(tree.get_neighbor_code(corner, 2, {1, 0, 0}).value == UINT64_MAX);
+        REQUIRE(tree.get_neighbor_code(corner, 2, {0, 1, 0}).value == UINT64_MAX);
+        REQUIRE(tree.get_neighbor_code(corner, 2, {0, 0, 1}).value == UINT64_MAX);
+    }
+    SECTION("interior +neighbours still resolve; -dir boundary is out of bounds") {
+        MortonCode interior = at(step2, step2, step2);
+        REQUIRE(tree.get_neighbor_code(interior, 2, {1, 0, 0}).value != UINT64_MAX);
+        MortonCode origin = at(0, 0, 0);
+        REQUIRE(tree.get_neighbor_code(origin, 2, {-1, 0, 0}).value == UINT64_MAX);
+    }
+    SECTION("a level-0 cell has no neighbour (and no 1<<64 shift UB)") {
+        REQUIRE(tree.get_neighbor_code(MortonCode{0}, 0, {1, 0, 0}).value == UINT64_MAX);
+        REQUIRE(tree.get_neighbor_code(MortonCode{0}, 0, {0, 1, 0}).value == UINT64_MAX);
+    }
+}
+
 TEMPLATE_TEST_CASE("Adaptivity & Coarsening (Burstedde §3.2)", "[amr][coarsen]", Quadtree, Octree) {
     constexpr int DIM = (std::is_same<TestType, Quadtree>::value) ? 2 : 3;
 

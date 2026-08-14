@@ -93,6 +93,10 @@ HOST_DEVICE uint64_t get_neighbor_code(uint64_t code, int level, int max_level, 
             return UINT64_MAX;
         if (d == 0)
             return c;
+        // A level-0 cell spans the whole domain: any neighbour is out of bounds,
+        // and returning here avoids the 1<<64 shift below at the maximum level.
+        if (level == 0)
+            return UINT64_MAX;
 
         uint64_t shift = max_level - level;
         uint64_t one;
@@ -107,7 +111,14 @@ HOST_DEVICE uint64_t get_neighbor_code(uint64_t code, int level, int max_level, 
             one <<= 2;
 
         if (d > 0) {
-            if ((c | ~mask) == UINT64_MAX)
+            // Out of the domain iff this axis already sits at its maximum aligned
+            // coordinate for this level. (The old all-ones test only fired at full
+            // resolution, so a coarser boundary cell's +neighbour wrapped instead
+            // of returning the sentinel.)
+            const uint64_t domain_mask =
+                (DIM * max_level >= 64) ? ~0ULL : ((1ULL << (DIM * max_level)) - 1);
+            const uint64_t axis_max = (mask & domain_mask) & ~(one - 1);
+            if ((c & mask) == axis_max)
                 return UINT64_MAX;
             uint64_t sum = (c | ~mask) + one;
             return (sum & mask) | (c & ~mask);

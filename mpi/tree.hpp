@@ -157,6 +157,10 @@ public:
                 return current;
             if (d == 0)
                 return current;
+            // A level-0 cell spans the whole domain: any neighbour is out of
+            // bounds, and returning here avoids the 1<<64 shift at the max level.
+            if (level == 0)
+                return std::numeric_limits<uint64_t>::max();
             uint64_t shift_coord = max_level - level;
             uint64_t one_dilated =
                 (DIM == 3) ? (1ULL << (shift_coord * 3)) : (1ULL << (shift_coord * 2));
@@ -165,7 +169,14 @@ public:
             if (dim_mask == mask_z)
                 one_dilated <<= 2;
             if (d > 0) {
-                if ((current | ~dim_mask) == std::numeric_limits<uint64_t>::max())
+                // Out of the domain iff this axis already sits at its maximum
+                // aligned coordinate for this level. (The old all-ones test only
+                // fired at full resolution, so a coarser boundary cell's +neighbour
+                // wrapped instead of returning the sentinel.)
+                const uint64_t domain_mask =
+                    (DIM * max_level >= 64) ? ~0ULL : ((1ULL << (DIM * max_level)) - 1);
+                const uint64_t axis_max = (dim_mask & domain_mask) & ~(one_dilated - 1);
+                if ((current & dim_mask) == axis_max)
                     return std::numeric_limits<uint64_t>::max();
                 uint64_t sum = (current | ~dim_mask) + one_dilated;
                 return (sum & dim_mask) | (current & ~dim_mask);
