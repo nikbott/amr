@@ -657,6 +657,51 @@ TEST_CASE("AMR1 element-type tag (mesh_io #12)", "[mesh_io][elem_type]") {
     }
 }
 
+TEST_CASE("AMR1 reader rejects malformed input cleanly (mesh_io)", "[mesh_io][robustness]") {
+    namespace mio = amr::mesh_io;
+    auto path = (std::filesystem::temp_directory_path() / "amr_mesh_io_bad.bin").string();
+
+    SECTION("an unknown field dtype is rejected, not silently read as float32") {
+        {
+            std::ofstream os(path, std::ios::binary | std::ios::trunc);
+            os.write("AMR1", 4);
+            mio::detail::put<uint32_t>(os, 2u);  // version 2
+            mio::detail::put<uint32_t>(os, 2u);  // dim
+            mio::detail::put<uint32_t>(os, 1u);  // max_level
+            mio::detail::put<uint32_t>(os, 0u);  // elem_type T3
+            mio::detail::put<uint64_t>(os, 0u);  // n_leaves = 0
+            for (int k = 0; k < 2; ++k)
+                mio::detail::put<double>(os, 0.0);
+            for (int k = 0; k < 2; ++k)
+                mio::detail::put<double>(os, 1.0);
+            mio::detail::put<uint32_t>(os, 1u);  // n_fields = 1
+            mio::detail::put<uint32_t>(os, 1u);  // name_len = 1
+            os.put('f');                         // name
+            mio::detail::put<uint32_t>(os, 2u);  // bogus dtype (only 0/1 valid)
+        }
+        REQUIRE_THROWS_AS(mio::read(path), std::runtime_error);
+        std::filesystem::remove(path);
+    }
+
+    SECTION("a hostile leaf count throws runtime_error, not bad_alloc") {
+        {
+            std::ofstream os(path, std::ios::binary | std::ios::trunc);
+            os.write("AMR1", 4);
+            mio::detail::put<uint32_t>(os, 2u);     // version 2
+            mio::detail::put<uint32_t>(os, 2u);     // dim
+            mio::detail::put<uint32_t>(os, 1u);     // max_level
+            mio::detail::put<uint32_t>(os, 0u);     // elem_type
+            mio::detail::put<uint64_t>(os, ~0ull);  // n_leaves = 2^64-1 (hostile)
+            for (int k = 0; k < 2; ++k)
+                mio::detail::put<double>(os, 0.0);
+            for (int k = 0; k < 2; ++k)
+                mio::detail::put<double>(os, 1.0);
+        }
+        REQUIRE_THROWS_AS(mio::read(path), std::runtime_error);  // bounded before allocation
+        std::filesystem::remove(path);
+    }
+}
+
 // Snapshot the current leaf set in Morton (iteration) order -- the order the DIC
 // error array is expected to align with.
 template <typename Tree>
