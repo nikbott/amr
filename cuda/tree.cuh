@@ -670,15 +670,41 @@ public:
     // Number of ripple passes the last balance*() call performed.
     int last_balance_iters = 0;
 
+    // Whether the last balance() collapsed to the whole-mesh (== balance_ref)
+    // path because the insulation layer spanned the mesh. Lets a test assert the
+    // wide-front fallback was actually exercised, not silently skipped.
+    bool last_front_collapsed = false;
+
     // Active-front 2:1 balance (production). Byte-identical output to balance_ref()
-    // but passes 2..K only inspect the advancing refinement front (see the
-    // k_check_balance_active / k_seed_dirty kernels above), so cost is proportional
-    // to the front, not the whole mesh. This is the headline single-GPU optimization.
+    // but re-checks only the *insulation / preclusion layer* -- the advancing
+    // refinement front plus the pre-existing finer cells that could still flag it
+    // ([IBG2012] Sec. II-B: balance information flows only within insulation
+    // layers). So each pass costs O(front), not O(N), on thin features.
+    //
+    // Single-round preclusion vs. multi-round ripple. The classic ripple re-scans
+    // the whole mesh every pass. Here, after each refinement we seed the next
+    // pass's dirty set to exactly the cells the just-created children can interact
+    // with -- one seeding round replaces one whole-mesh scan. When the front stays
+    // thin (a crack line, a graded shell) this is a large win.
+    //
+    // The one regime where a front-tracked pass cannot beat a plain one is a front
+    // that already spans a big fraction of the mesh (a crack *plane* in 3D): the
+    // insulation layer is then ~everything, so the dirty machinery (mask fills,
+    // masked reads) is pure overhead over the plain check. We detect that with a
+    // cheap, allocation-free pre-filter on the just-refined count and, once it
+    // fires, fall through -- stickily -- to the identical whole-mesh check used by
+    // balance_ref(), dropping ALL dirty bookkeeping for the remaining passes. This
+    // keeps balance() >= balance_ref() on every workload (no more wide-front
+    // regression) while preserving the thin-front speedup. Output stays
+    // byte-identical to balance_ref() -- a full check is a strict superset of the
+    // preclusion-layer check, so it produces the same flags. See
+    // run_test_active_parity in tests.cu.
     void balance() {
         last_balance_iters = 0;
 
-        int check_block, scatter_block, seed_block, d;
-        cudaOccupancyMaxPotentialBlockSize(&d, &check_block, k_check_balance_active<DIM>, 0, 0);
+        int active_block, full_block, scatter_block, seed_block, d;
+        cudaOccupancyMaxPotentialBlockSize(&d, &active_block, k_check_balance_active<DIM>, 0, 0);
+        cudaOccupancyMaxPotentialBlockSize(&d, &full_block, k_check_balance<DIM>, 0, 0);
         cudaOccupancyMaxPotentialBlockSize(&d, &scatter_block, k_scatter_refine, 0, 0);
         cudaOccupancyMaxPotentialBlockSize(&d, &seed_block, k_mark_child_neighbors<DIM>, 0, 0);
 
@@ -688,7 +714,9 @@ public:
         thrust::device_vector<uint8_t> dirty(codes.size(), 1);
         thrust::device_vector<uint8_t> child_mask;
         thrust::device_vector<uint8_t> dirty_next;
-        bool front_collapsed = false;  // sticky: fall back to full checks if front grows large
+        // Sticky: once the insulation layer spans the mesh, drop front-tracking and
+        // run plain whole-mesh checks (== balance_ref) for the rest of the balance.
+        bool front_collapsed = false;
 
         while (true) {
             int n = codes.size();
@@ -697,15 +725,28 @@ public:
             thrust::fill(aux_flags.begin(), aux_flags.end(), 0);
             violation_flag[0] = 0;
 
-            int grid = (n + check_block - 1) / check_block;
-            k_check_balance_active<DIM>
-                <<<grid, check_block>>>(thrust::raw_pointer_cast(codes.data()),
-                                        thrust::raw_pointer_cast(levels.data()),
-                                        n,
-                                        max_level,
-                                        thrust::raw_pointer_cast(dirty.data()),
-                                        thrust::raw_pointer_cast(aux_flags.data()),
-                                        thrust::raw_pointer_cast(violation_flag.data()));
+            if (front_collapsed) {
+                // Plain whole-mesh check: no dirty mask, no masked reads -- exactly
+                // the balance_ref() inner loop, zero front-tracking overhead.
+                int grid = (n + full_block - 1) / full_block;
+                k_check_balance<DIM>
+                    <<<grid, full_block>>>(thrust::raw_pointer_cast(codes.data()),
+                                           thrust::raw_pointer_cast(levels.data()),
+                                           n,
+                                           max_level,
+                                           thrust::raw_pointer_cast(aux_flags.data()),
+                                           thrust::raw_pointer_cast(violation_flag.data()));
+            } else {
+                int grid = (n + active_block - 1) / active_block;
+                k_check_balance_active<DIM>
+                    <<<grid, active_block>>>(thrust::raw_pointer_cast(codes.data()),
+                                             thrust::raw_pointer_cast(levels.data()),
+                                             n,
+                                             max_level,
+                                             thrust::raw_pointer_cast(dirty.data()),
+                                             thrust::raw_pointer_cast(aux_flags.data()),
+                                             thrust::raw_pointer_cast(violation_flag.data()));
+            }
             CHECK_CUDA(cudaDeviceSynchronize());
 
             if (violation_flag[0] == 0)
@@ -737,65 +778,70 @@ public:
                 DIM);
             CHECK_CUDA(cudaDeviceSynchronize());
 
-            // Seed the next pass's dirty mask over the NEW array. Front-tracking
-            // only pays off when the refinement front stays a small fraction of the
-            // mesh. For a large front (e.g. a crack plane), marking every child's
-            // fine neighbours produces a dirty set nearly as big as the whole mesh,
-            // so the seeding work is wasted -- the next check is no cheaper than a
-            // full one. We detect this by measuring the seeded dirty count, and once
-            // it is large we STICK to plain full checks for the rest of the balance
-            // (front_collapsed). This keeps balance() >= balance_ref() on every
-            // workload while winning big on thin features.
-            // Cheap pre-filter: if this pass already refined a large fraction, the
-            // front is wide -> skip seeding outright (children = refined*2^DIM is a
-            // lower bound on the dirty set). The reduce below is the backstop for
-            // fronts that are sparse in children yet wide after neighbour marking.
-            long long refined = (long long)(total - n) / ((1 << DIM) - 1);
-            if (front_collapsed || refined * (1 << DIM) * 64 > (long long)total) {
-                dirty_next.assign(total, 1);  // plain full check, no seeding
-            } else {
-                dirty_next.assign(total, 0);
-                // Pass A: mark new children (over OLD refined cells).
-                child_mask.assign(total, 0);
-                int childA_grid = (n + seed_block - 1) / seed_block;
-                k_mark_children<<<childA_grid, seed_block>>>(
-                    n,
-                    thrust::raw_pointer_cast(aux_flags.data()),
-                    thrust::raw_pointer_cast(aux_offsets.data()),
-                    thrust::raw_pointer_cast(child_mask.data()),
-                    DIM);
-                CHECK_CUDA(cudaDeviceSynchronize());
-
-                // Pass B: from each new child, mark its face-neighbours (over NEW cells).
-                thrust::copy(child_mask.begin(), child_mask.end(), dirty_next.begin());
-                int childB_grid = (total + seed_block - 1) / seed_block;
-                k_mark_child_neighbors<DIM>
-                    <<<childB_grid, seed_block>>>(thrust::raw_pointer_cast(scratch_codes.data()),
-                                                  thrust::raw_pointer_cast(scratch_levels.data()),
-                                                  total,
-                                                  max_level,
-                                                  thrust::raw_pointer_cast(child_mask.data()),
-                                                  thrust::raw_pointer_cast(dirty_next.data()));
-                CHECK_CUDA(cudaDeviceSynchronize());
-
-                // If the resulting front is a large fraction of the mesh, stop
-                // front-tracking for the remaining passes (cheap reduce; the
-                // dirty set we just built is still correct to use this once).
-                long long dirty_count = thrust::reduce(dirty_next.begin(), dirty_next.end(), 0LL);
-                if (dirty_count * 8 > (long long)total)
-                    front_collapsed = true;
-            }
-
             codes.swap(scratch_codes);
             levels.swap(scratch_levels);
+
+            if (front_collapsed)
+                continue;  // stay in whole-mesh mode; no seeding, no dirty swap
+
+            // Cheap, allocation-free pre-filter: if this pass alone refined a large
+            // fraction, the insulation layer already spans the mesh, so seeding is
+            // wasted. children = refined*2^DIM is a lower bound on the dirty set.
+            long long refined = (long long)(total - n) / ((1 << DIM) - 1);
+            if (refined * (1 << DIM) * 64 > (long long)total) {
+                front_collapsed = true;
+                continue;
+            }
+
+            // Seed the next pass's dirty set to the preclusion layer over the NEW
+            // array: the just-created children plus their equal-or-finer neighbours
+            // (the only cells that can newly violate 2:1 next pass).
+            dirty_next.assign(total, 0);
+            // Pass A: mark new children (over OLD refined cells).
+            child_mask.assign(total, 0);
+            int childA_grid = (n + seed_block - 1) / seed_block;
+            k_mark_children<<<childA_grid, seed_block>>>(
+                n,
+                thrust::raw_pointer_cast(aux_flags.data()),
+                thrust::raw_pointer_cast(aux_offsets.data()),
+                thrust::raw_pointer_cast(child_mask.data()),
+                DIM);
+            CHECK_CUDA(cudaDeviceSynchronize());
+
+            // Pass B: from each new child, mark its face/edge neighbours (over NEW cells).
+            thrust::copy(child_mask.begin(), child_mask.end(), dirty_next.begin());
+            int childB_grid = (total + seed_block - 1) / seed_block;
+            k_mark_child_neighbors<DIM>
+                <<<childB_grid, seed_block>>>(thrust::raw_pointer_cast(codes.data()),
+                                              thrust::raw_pointer_cast(levels.data()),
+                                              total,
+                                              max_level,
+                                              thrust::raw_pointer_cast(child_mask.data()),
+                                              thrust::raw_pointer_cast(dirty_next.data()));
+            CHECK_CUDA(cudaDeviceSynchronize());
+
+            // Backstop the pre-filter: the flood the pre-filter cannot see is a
+            // few coarse cells EACH with a wide fan of finer neighbours (a crack
+            // *plane*: pass 1 refines ~4 cells yet their neighbours cover the whole
+            // mesh). One O(n) reduce catches it -- if the seeded layer already
+            // spans more than half the mesh, the next check would be ~full anyway,
+            // so collapse to whole-mesh checks (== balance_ref) for good.
+            long long dirty_count = thrust::reduce(dirty_next.begin(), dirty_next.end(), 0LL);
+            if (dirty_count * 2 > (long long)total) {
+                front_collapsed = true;
+                continue;
+            }
+
             dirty.swap(dirty_next);
         }
+        last_front_collapsed = front_collapsed;
     }
 
     // Reference 2:1 balance: re-checks the whole mesh every pass. Simple and
     // obviously correct; kept as the parity oracle and benchmark baseline.
     void balance_ref() {
         last_balance_iters = 0;
+        last_front_collapsed = false;
         thrust::device_vector<int> violation_flag(1);
 
         int check_block, check_grid_dummy;

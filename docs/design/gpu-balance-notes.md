@@ -25,10 +25,16 @@ There are three paradigms, in increasing sophistication:
    effect*), so it is inherently iterative and each pass re-scans O(N).
 
 2. **Active-front ripple** (our production `cuda/tree.cuh::balance`). Same
-   output, but after pass 1 only re-check cells adjacent to the previous pass's
-   refinements. **Byte-identical** to `balance_ref` (test `run_test_active_parity`),
-   ~1.8× faster on thin features, ~parity on wide fronts (adaptive fallback).
-   This is an engineering approximation of the next idea.
+   output, but each pass re-checks only the **insulation / preclusion layer** —
+   the just-refined children plus the pre-existing finer cells that can still
+   flag them — instead of the whole mesh. **Byte-identical** to `balance_ref`
+   (test `run_test_active_parity`, incl. a wide-front `crack` fixture),
+   ~2.2× faster on the sphere (89 M leaves) and ~1.8× on a thin crack. When that
+   layer grows to span the mesh (a crack *plane*: one coarse cell fans out to
+   the whole domain), a cheap pre-filter plus one O(n) reduce detect it and the
+   balance **falls through, stickily, to the plain whole-mesh check** that
+   `balance_ref` uses — zero front-tracking overhead — so `balance ≥ balance_ref`
+   on every workload. This is an engineering approximation of the next idea.
 
 3. **Insulation-layer + preclusion** ([SSB2008], [IBG2012]; the *ideal* target).
    The key theorem ([IBG2012] §II-B): two octants `o`, `r` can be unbalanced
