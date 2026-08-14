@@ -9,9 +9,10 @@
  *
  * Layout:
  *   [ magic    : 4 bytes  = "AMR1" ]
- *   [ version  : uint32   = 1 ]
+ *   [ version  : uint32   = 2 ]
  *   [ dim      : uint32   (2 or 3) ]
  *   [ max_level: uint32 ]
+ *   [ elem_type: uint32   (target element for the DIC bridge; version >= 2) ]
  *   [ n_leaves : uint64 ]
  *   [ bbox     : 2*dim float64 (origin[dim], then size[dim]) ]
  *   [ codes    : uint64 * n_leaves ]
@@ -23,6 +24,13 @@
  *       [ dtype : uint32 (0 = float32, 1 = float64) ]
  *       [ values: dtype * n_leaves ]
  *
+ * The `elem_type` tag names the simplex the DIC bridge (`importFromAmr`)
+ * triangulates each leaf into -- Correli's correlation kernel is T3/T4-only, so a
+ * mesh is emitted as T3 in 2D and T4 in 3D. It is carried explicitly so the bridge
+ * validates the target rather than assuming it, and Q4/H8 can be tagged if the
+ * kernel ever gains them. Values reuse Correli's element codes (T3=0, Q4=1, T4=4,
+ * H8=5). Version 1 files carry no tag and read back as the T3/T4 default for `dim`.
+ *
  * Endianness: written in host byte order, which is little-endian on the x86/ARM
  * targets this runs on; the format is defined as little-endian. (A byte-swap
  * shim can be added if a big-endian consumer ever appears.)
@@ -33,11 +41,21 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace amr::mesh_io {
+
+// Target element the DIC bridge triangulates each leaf into. Codes match
+// Correli's element library; the kernel supports only the simplices T3/T4.
+enum class ElemType : uint32_t { T3 = 0, Q4 = 1, T4 = 4, H8 = 5 };
+
+// The simplex the bridge emits for a given dimension (T3 in 2D, T4 in 3D).
+inline ElemType default_elem_type(uint32_t dim) {
+    return dim == 2 ? ElemType::T3 : ElemType::T4;
+}
 
 // A per-leaf scalar field (e.g. a DIC error metric driving the oracle).
 // Values are held as double; `f64` selects the on-disk precision.
@@ -50,6 +68,9 @@ struct Field {
 struct MeshData {
     uint32_t dim = 2;
     uint32_t max_level = 0;
+    // Unset means "derive the T3/T4 default from dim" at write time; read()
+    // always populates it with the concrete on-disk (or defaulted) tag.
+    std::optional<ElemType> elem_type;
     std::array<double, 3> origin{{0, 0, 0}};  // first `dim` used
     std::array<double, 3> size{{1, 1, 1}};    // first `dim` used
     std::vector<uint64_t> codes;
@@ -96,10 +117,13 @@ inline void write(const std::string& path, const MeshData& m) {
     if (!os)
         throw std::runtime_error("mesh_io::write: cannot open " + path);
 
+    const ElemType et = m.elem_type.value_or(default_elem_type(m.dim));
+
     os.write("AMR1", 4);
-    detail::put<uint32_t>(os, 1u);  // version
+    detail::put<uint32_t>(os, 2u);  // version
     detail::put<uint32_t>(os, m.dim);
     detail::put<uint32_t>(os, m.max_level);
+    detail::put<uint32_t>(os, static_cast<uint32_t>(et));
     detail::put<uint64_t>(os, n);
     for (uint32_t k = 0; k < m.dim; ++k)
         detail::put<double>(os, m.origin[k]);
@@ -143,7 +167,7 @@ inline MeshData read(const std::string& path) {
     if (!is || std::memcmp(magic, "AMR1", 4) != 0)
         throw std::runtime_error("mesh_io::read: bad magic (not an AMR1 file)");
     const uint32_t version = detail::get<uint32_t>(is);
-    if (version != 1)
+    if (version != 1 && version != 2)
         throw std::runtime_error("mesh_io::read: unsupported version");
 
     MeshData m;
@@ -151,6 +175,21 @@ inline MeshData read(const std::string& path) {
     if (m.dim != 2 && m.dim != 3)
         throw std::runtime_error("mesh_io::read: bad dim");
     m.max_level = detail::get<uint32_t>(is);
+    if (version >= 2) {
+        const uint32_t raw = detail::get<uint32_t>(is);
+        switch (static_cast<ElemType>(raw)) {
+            case ElemType::T3:
+            case ElemType::Q4:
+            case ElemType::T4:
+            case ElemType::H8:
+                m.elem_type = static_cast<ElemType>(raw);
+                break;
+            default:
+                throw std::runtime_error("mesh_io::read: unknown element type");
+        }
+    } else {
+        m.elem_type = default_elem_type(m.dim);  // version 1 carries no tag
+    }
     const uint64_t n = detail::get<uint64_t>(is);
     for (uint32_t k = 0; k < m.dim; ++k)
         m.origin[k] = detail::get<double>(is);

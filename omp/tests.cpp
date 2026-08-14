@@ -503,6 +503,7 @@ TEMPLATE_TEST_CASE("Binary mesh+field format round-trip (mesh_io C.2)",
         }
         REQUIRE(r.codes == m.codes);  // bit-exact
         REQUIRE(r.levels == m.levels);
+        REQUIRE(r.elem_type == mesh_io::default_elem_type(DIM));  // unset -> dim default
 
         REQUIRE(r.fields.size() == 2);
         REQUIRE(r.fields[0].name == "dic_error");
@@ -552,6 +553,71 @@ TEST_CASE("Binary mesh+field format edge cases (mesh_io C.2)", "[mesh_io]") {
         REQUIRE(r.codes == m.codes);
         REQUIRE(r.fields.size() == 1);
         REQUIRE(r.fields[0].values == m.fields[0].values);
+        std::filesystem::remove(path);
+    }
+}
+
+TEST_CASE("AMR1 element-type tag (mesh_io #12)", "[mesh_io][elem_type]") {
+    namespace mio = amr::mesh_io;
+    auto path = (std::filesystem::temp_directory_path() / "amr_mesh_io_etype.bin").string();
+
+    SECTION("unset tag defaults to the dim simplex on write") {
+        for (uint32_t dim : {2u, 3u}) {
+            mio::MeshData m;
+            m.dim = dim;
+            mio::write(path, m);
+            mio::MeshData r = mio::read(path);
+            REQUIRE(r.elem_type == mio::default_elem_type(dim));
+        }
+        std::filesystem::remove(path);
+    }
+
+    SECTION("an explicit tag round-trips") {
+        mio::MeshData m;
+        m.dim = 2;
+        m.elem_type = mio::ElemType::Q4;  // overriding the T3 default
+        mio::write(path, m);
+        mio::MeshData r = mio::read(path);
+        REQUIRE(r.elem_type == mio::ElemType::Q4);
+        std::filesystem::remove(path);
+    }
+
+    SECTION("a version-1 file (no tag) reads back as the dim default") {
+        // Hand-write a minimal v1 header (empty mesh, no fields).
+        {
+            std::ofstream os(path, std::ios::binary | std::ios::trunc);
+            os.write("AMR1", 4);
+            mio::detail::put<uint32_t>(os, 1u);  // version 1: no elem_type on disk
+            mio::detail::put<uint32_t>(os, 3u);  // dim
+            mio::detail::put<uint32_t>(os, 5u);  // max_level
+            mio::detail::put<uint64_t>(os, 0u);  // n_leaves
+            for (int k = 0; k < 3; ++k)
+                mio::detail::put<double>(os, 0.0);  // origin
+            for (int k = 0; k < 3; ++k)
+                mio::detail::put<double>(os, 1.0);  // size
+            mio::detail::put<uint32_t>(os, 0u);     // n_fields
+        }
+        mio::MeshData r = mio::read(path);
+        REQUIRE(r.elem_type == mio::ElemType::T4);  // dim==3 default
+        std::filesystem::remove(path);
+    }
+
+    SECTION("an unknown element code is rejected") {
+        {
+            std::ofstream os(path, std::ios::binary | std::ios::trunc);
+            os.write("AMR1", 4);
+            mio::detail::put<uint32_t>(os, 2u);   // version 2
+            mio::detail::put<uint32_t>(os, 2u);   // dim
+            mio::detail::put<uint32_t>(os, 1u);   // max_level
+            mio::detail::put<uint32_t>(os, 99u);  // bogus elem_type
+            mio::detail::put<uint64_t>(os, 0u);   // n_leaves
+            for (int k = 0; k < 2; ++k)
+                mio::detail::put<double>(os, 0.0);
+            for (int k = 0; k < 2; ++k)
+                mio::detail::put<double>(os, 1.0);
+            mio::detail::put<uint32_t>(os, 0u);
+        }
+        REQUIRE_THROWS_AS(mio::read(path), std::runtime_error);
         std::filesystem::remove(path);
     }
 }
