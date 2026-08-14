@@ -220,6 +220,29 @@ struct CloudOracle {
     }
 };
 
+// Thin, deeply refined feature (line in 2D, plane in 3D) straddling the mid
+// coordinate: a WIDE balance front whose insulation layer spans the mesh from
+// pass 1. Exercises the front_collapsed (whole-mesh fallback) path in balance(),
+// which the small tower/cloud fixtures do not reach.
+struct CrackOracle {
+    int max_lvl;
+    int dim;
+    int fine;
+    uint64_t mid;
+    CrackOracle(int m, int d, int f) : max_lvl(m), dim(d), fine(f) { mid = (1ULL << m) / 2; }
+    HOST_DEVICE bool operator()(MortonCode mc, int lvl) const {
+        if (lvl >= fine)
+            return false;
+        Coordinate x, y, z{0};
+        if (dim == 2)
+            morton::decode_2d(mc, x, y);
+        else
+            morton::decode_3d(mc, x, y, z);
+        uint64_t size = 1ULL << (max_lvl - lvl);
+        return (x.value <= mid && (x.value + size) > mid);
+    }
+};
+
 // ==================================================================================
 // TEMPLATED TEST CASES
 // ==================================================================================
@@ -365,7 +388,8 @@ void run_test_random_cloud() {
 // ==================================================================================
 
 template <int DIM, typename Oracle>
-void check_balance_parity(const char* name, int max_lvl, Oracle oracle, int refine_steps) {
+void check_balance_parity(
+    const char* name, int max_lvl, Oracle oracle, int refine_steps, bool expect_collapse = false) {
     LinearTree<DIM> ref(max_lvl);
     LinearTree<DIM> act(max_lvl);
     for (int i = 0; i < refine_steps; ++i) {
@@ -375,6 +399,11 @@ void check_balance_parity(const char* name, int max_lvl, Oracle oracle, int refi
 
     ref.balance_ref();  // baseline: whole-mesh re-check every pass
     act.balance();      // headline: active-front re-check
+
+    // Prove the intended path ran: a wide-front fixture must actually trip the
+    // whole-mesh fallback, or it silently tests only the front-tracked path.
+    if (expect_collapse)
+        CHECK(act.last_front_collapsed);
 
     REQUIRE(ref.size() == act.size());
 
@@ -400,6 +429,15 @@ void run_test_active_parity() {
     check_balance_parity<DIM>("cloud", 8, CloudOracle{5}, 8);
     check_balance_parity<DIM>("random", 5, RandomRefineOracle{}, 5);
     check_balance_parity<DIM>("graded", 5, GradedOracle{5, DIM}, 5);
+    // Wide-front fixture: forces balance()'s whole-mesh fallback and checks it
+    // still matches balance_ref() byte-for-byte. 2D goes deeper (cheap); 3D is
+    // kept shallower to bound the leaf count.
+    int crack_lvl = (DIM == 2) ? 10 : 7;
+    check_balance_parity<DIM>("crack",
+                              crack_lvl,
+                              CrackOracle(crack_lvl, DIM, crack_lvl),
+                              crack_lvl,
+                              /*expect_collapse=*/true);
     std::cout << "[Test] Active-front parity " << DIM << "D... PASSED\n";
 }
 
