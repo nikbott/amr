@@ -162,6 +162,18 @@ inline MeshData read(const std::string& path) {
     if (!is)
         throw std::runtime_error("mesh_io::read: cannot open " + path);
 
+    // File size, so untrusted header counts (n_leaves, n_fields, name_len) are
+    // bounded before any allocation -- a malformed/hostile header must not turn
+    // into a std::bad_alloc/length_error (the contract is std::runtime_error) or
+    // a memory-DoS.
+    is.seekg(0, std::ios::end);
+    const std::streamoff file_size = is.tellg();
+    is.seekg(0, std::ios::beg);
+    const auto remaining = [&]() -> uint64_t {
+        const std::streamoff pos = is.tellg();
+        return (pos < 0 || file_size < pos) ? 0 : static_cast<uint64_t>(file_size - pos);
+    };
+
     char magic[4];
     is.read(magic, 4);
     if (!is || std::memcmp(magic, "AMR1", 4) != 0)
@@ -196,6 +208,8 @@ inline MeshData read(const std::string& path) {
     for (uint32_t k = 0; k < m.dim; ++k)
         m.size[k] = detail::get<double>(is);
 
+    if (n > remaining() / (sizeof(uint64_t) + 1))  // each leaf: 8-byte code + 1-byte level
+        throw std::runtime_error("mesh_io::read: leaf count exceeds file size");
     m.codes.resize(n);
     m.levels.resize(n);
     if (n)
@@ -208,14 +222,20 @@ inline MeshData read(const std::string& path) {
     is.seekg(static_cast<std::streamoff>(detail::pad_to_8(n)), std::ios::cur);
 
     const uint32_t n_fields = detail::get<uint32_t>(is);
+    if (n_fields > remaining() / 8)  // each field header is at least name_len(4)+dtype(4)
+        throw std::runtime_error("mesh_io::read: field count exceeds file size");
     m.fields.reserve(n_fields);
     for (uint32_t fi = 0; fi < n_fields; ++fi) {
         Field f;
         const uint32_t name_len = detail::get<uint32_t>(is);
+        if (name_len > remaining())
+            throw std::runtime_error("mesh_io::read: field name length exceeds file size");
         f.name.resize(name_len);
         if (name_len)
             is.read(f.name.data(), static_cast<std::streamsize>(name_len));
         const uint32_t dtype = detail::get<uint32_t>(is);
+        if (dtype > 1)  // 0 = float32, 1 = float64; anything else would silently mis-parse
+            throw std::runtime_error("mesh_io::read: field '" + f.name + "' has unknown dtype");
         f.f64 = (dtype == 1);
         f.values.resize(n);
         if (f.f64) {
