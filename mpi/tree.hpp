@@ -535,15 +535,22 @@ private:
         std::sort(needed.begin(), needed.end());
         needed.erase(std::unique(needed.begin(), needed.end()), needed.end());
         std::vector<std::vector<Node>> send_bufs(mpi_size), recv_bufs(mpi_size);
+        // Locate the owner of req_start by binary search on the sorted partition
+        // map, then walk only the contiguous run of ranks that overlaps
+        // [req_start, req_end). Replaces the old O(needed * P) scan over every
+        // rank with O(needed * (log P + k)); the resulting send_bufs are
+        // identical (same nodes routed to the same ranks).
         for (const auto& node : needed) {
             uint64_t req_start = node.code.value;
             uint64_t req_end = node.code.value + (1ULL << (DIM * (max_level - node.level)));
-            for (int r = 0; r < mpi_size; ++r) {
-                if (r == mpi_rank)
-                    continue;
+            for (int r = find_owner_of_point(req_start); r < mpi_size; ++r) {
                 uint64_t r_start = partition_starts[r];
+                if (r_start >= req_end)
+                    break;  // map is non-decreasing: no later rank can overlap
                 uint64_t r_end = (r == mpi_size - 1) ? std::numeric_limits<uint64_t>::max()
                                                      : partition_starts[r + 1];
+                if (r == mpi_rank)
+                    continue;
                 if (std::max(req_start, r_start) < std::min(req_end, r_end))
                     send_bufs[r].push_back(node);
             }
@@ -576,33 +583,122 @@ private:
         ghost_nodes.erase(std::unique(ghost_nodes.begin(), ghost_nodes.end()), ghost_nodes.end());
     }
 
+    // Distinct-neighbour count at or below which point-to-point (Isend/Irecv)
+    // is used instead of a neighbourhood collective. For a handful of partners
+    // the zero setup cost of non-blocking sends beats building and freeing a
+    // distributed-graph communicator; denser neighbour sets amortise the
+    // communicator and profit from the topology-aware collective ([IBWG2015]).
+    static constexpr int SPARSE_NEIGHBOR_LIMIT = 4;
+
+    // Sparse neighbourhood ghost exchange. sends[r] holds the payload destined
+    // for rank r; on return recvs[r] holds what rank r sent us. This moves
+    // byte-for-byte the same data a dense MPI_Alltoallv would -- only the
+    // routing differs, so the resulting ghost set is unchanged.
     template <typename T>
     void exchange_data(const std::vector<std::vector<T>>& sends,
                        std::vector<std::vector<T>>& recvs) {
-        std::vector<int> sc(mpi_size), rc(mpi_size), sdisp(mpi_size + 1), rdisp(mpi_size + 1);
+        // 1. Per-rank send counts (bytes) and the reciprocal recv counts. This
+        //    counts exchange is one int per rank (cheap) and simultaneously
+        //    reveals the source neighbour set -- exactly as before.
+        std::vector<int> sc(mpi_size), rc(mpi_size);
         for (int i = 0; i < mpi_size; ++i)
-            sc[i] = sends[i].size() * sizeof(T);
+            sc[i] = static_cast<int>(sends[i].size() * sizeof(T));
         MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT, MPI_COMM_WORLD);
-        for (int i = 0; i < mpi_size; ++i) {
-            sdisp[i + 1] = sdisp[i] + sc[i];
-            rdisp[i + 1] = rdisp[i] + rc[i];
+
+        // 2. Neighbour sets: destinations (I send to) and sources (I recv from).
+        std::vector<int> dests, srcs;
+        for (int r = 0; r < mpi_size; ++r) {
+            if (sc[r] > 0)
+                dests.push_back(r);
+            if (rc[r] > 0)
+                srcs.push_back(r);
         }
-        std::vector<uint8_t> sflat(sdisp.back()), rflat(rdisp.back());
-        for (int i = 0; i < mpi_size; ++i)
-            memcpy(sflat.data() + sdisp[i], sends[i].data(), sc[i]);
-        MPI_Alltoallv(sflat.data(),
-                      sc.data(),
-                      sdisp.data(),
-                      MPI_BYTE,
-                      rflat.data(),
-                      rc.data(),
-                      rdisp.data(),
-                      MPI_BYTE,
-                      MPI_COMM_WORLD);
-        for (int i = 0; i < mpi_size; ++i) {
-            recvs[i].resize(rc[i] / sizeof(T));
-            memcpy(recvs[i].data(), rflat.data() + rdisp[i], rc[i]);
+        for (int r = 0; r < mpi_size; ++r)
+            recvs[r].clear();
+        for (int r : srcs)
+            recvs[r].resize(rc[r] / sizeof(T));
+
+        // The sparse-vs-collective choice must be globally uniform:
+        // MPI_Dist_graph_create_adjacent is collective over MPI_COMM_WORLD, so
+        // every rank has to agree on whether it runs. Reduce the local partner
+        // count to a global max and branch on that -- take the cheap
+        // point-to-point path only when *every* rank is sparse, else all ranks
+        // build the graph together. (A per-rank predicate would deadlock when
+        // ranks straddle the threshold, e.g. empty ranks vs dense interior ones.)
+        const int local_neighbors = static_cast<int>(std::max(dests.size(), srcs.size()));
+        int n_neighbors = 0;
+        MPI_Allreduce(&local_neighbors, &n_neighbors, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+
+        // 3a. Point-to-point fallback for the very sparse case.
+        if (n_neighbors <= SPARSE_NEIGHBOR_LIMIT) {
+            std::vector<MPI_Request> reqs;
+            reqs.reserve(srcs.size() + dests.size());
+            for (int r : srcs) {
+                reqs.emplace_back();
+                MPI_Irecv(recvs[r].data(), rc[r], MPI_BYTE, r, 0, MPI_COMM_WORLD, &reqs.back());
+            }
+            for (int r : dests) {
+                reqs.emplace_back();
+                MPI_Isend(const_cast<T*>(sends[r].data()),
+                          sc[r],
+                          MPI_BYTE,
+                          r,
+                          0,
+                          MPI_COMM_WORLD,
+                          &reqs.back());
+            }
+            if (!reqs.empty())
+                MPI_Waitall(static_cast<int>(reqs.size()), reqs.data(), MPI_STATUSES_IGNORE);
+            return;
         }
+
+        // 3b. Neighbourhood collective over a distributed-graph communicator.
+        //     create_adjacent preserves the source/destination order we pass,
+        //     so the flattened buffers below line up with srcs/dests directly.
+        MPI_Comm graph;
+        MPI_Dist_graph_create_adjacent(MPI_COMM_WORLD,
+                                       static_cast<int>(srcs.size()),
+                                       srcs.data(),
+                                       MPI_UNWEIGHTED,
+                                       static_cast<int>(dests.size()),
+                                       dests.data(),
+                                       MPI_UNWEIGHTED,
+                                       MPI_INFO_NULL,
+                                       0,
+                                       &graph);
+
+        std::vector<int> sendcounts(dests.size()), sdispls(dests.size());
+        std::vector<int> recvcounts(srcs.size()), rdispls(srcs.size());
+        int soff = 0;
+        for (size_t k = 0; k < dests.size(); ++k) {
+            sendcounts[k] = sc[dests[k]];
+            sdispls[k] = soff;
+            soff += sendcounts[k];
+        }
+        int roff = 0;
+        for (size_t k = 0; k < srcs.size(); ++k) {
+            recvcounts[k] = rc[srcs[k]];
+            rdispls[k] = roff;
+            roff += recvcounts[k];
+        }
+        std::vector<uint8_t> sflat(soff), rflat(roff);
+        for (size_t k = 0; k < dests.size(); ++k)
+            memcpy(sflat.data() + sdispls[k], sends[dests[k]].data(), sendcounts[k]);
+
+        MPI_Neighbor_alltoallv(sflat.data(),
+                               sendcounts.data(),
+                               sdispls.data(),
+                               MPI_BYTE,
+                               rflat.data(),
+                               recvcounts.data(),
+                               rdispls.data(),
+                               MPI_BYTE,
+                               graph);
+
+        for (size_t k = 0; k < srcs.size(); ++k)
+            memcpy(recvs[srcs[k]].data(), rflat.data() + rdispls[k], recvcounts[k]);
+
+        MPI_Comm_free(&graph);
     }
 
     template <typename Oracle>
