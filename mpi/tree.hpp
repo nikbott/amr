@@ -17,6 +17,17 @@
 
 namespace amr {
 
+// Downcast a byte count to the int the MPI count/displacement APIs require,
+// throwing rather than silently wrapping negative when a single message exceeds
+// 2 GB (INT_MAX) -- reachable only at billion-leaf scale, but a wrap there would
+// corrupt the transfer silently.
+inline int mpi_byte_count(std::size_t bytes) {
+    if (bytes > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        throw std::runtime_error(
+            "mpi: message exceeds INT_MAX bytes (2 GB); chunking not implemented");
+    return static_cast<int>(bytes);
+}
+
 struct Node {
     MortonCode code;
     int level;
@@ -423,9 +434,9 @@ public:
         auto exchange_vec = [&](auto& sends, auto& recvs) {
             std::vector<int> sc(mpi_size), rc(mpi_size), sdisp(mpi_size + 1), rdisp(mpi_size + 1);
 
-            // Safe downcast to int for MPI counts (assuming < 2GB per message)
+            // Downcast to int for MPI counts; throws past INT_MAX (2 GB/message).
             for (int i = 0; i < mpi_size; ++i)
-                sc[i] = static_cast<int>(
+                sc[i] = mpi_byte_count(
                     sends[i].size() *
                     sizeof(typename std::remove_reference_t<decltype(sends[0])>::value_type));
 
@@ -613,7 +624,7 @@ private:
         //    reveals the source neighbour set -- exactly as before.
         std::vector<int> sc(mpi_size), rc(mpi_size);
         for (int i = 0; i < mpi_size; ++i)
-            sc[i] = static_cast<int>(sends[i].size() * sizeof(T));
+            sc[i] = mpi_byte_count(sends[i].size() * sizeof(T));
         MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT, MPI_COMM_WORLD);
 
         // 2. Neighbour sets: destinations (I send to) and sources (I recv from).
