@@ -1,27 +1,39 @@
 /**
  * @file io.hpp
- * @brief SMX1: a simplicial mesh plus one index array, as one binary file.
+ * @brief SMX2: a typed unstructured mesh plus named arrays, as one binary file.
  *
- * @details The exchange format between simplex.hpp and MATLAB until the MEX
- * interface exists; the reader and writer on the MATLAB side live in the
- * adaptive-dic tests that drive `amr_simplex` (cli.cpp).
+ * @details The exchange format between the engine and MATLAB; the MATLAB
+ * reader and writer are adaptive-dic's `+amr` package. Little-endian, indices
+ * 0-based:
  *
- * Layout, little-endian, indices 0-based:
- *   [ magic      : 4 bytes = "SMX1" ]
- *   [ dim        : uint32  (2 or 3) ]
- *   [ n_nodes, n_elements, n_hanging, n_indices : uint64 each ]
- *   [ pos        : float64 * 3 * n_nodes,         row-major ]
- *   [ con        : int32 * (dim + 1) * n_elements, row-major ]
- *   [ hn         : int32 * 3 * n_hanging,          row-major ]
- *   [ indices    : int32 * n_indices ]
+ *   [ magic  : 4 bytes = "SMX2" ]
+ *   [ dim    : uint32 ]                      spatial dimension, 2 or 3
+ *   [ n_nodes, n_elements, n_constraints, n_constraint_parents, n_fields : uint64 each ]
+ *   [ pos    : float64 * 3 * n_nodes ]       row-major, z = 0 in 2D
+ *   [ type   : uint8 * n_elements ]          element codes (T3 = 0, T4 = 4)
+ *   [ con    : int32 * (vertices of each element, concatenated) ]
+ *   [ constrained node : int32 * n_constraints ]
+ *   [ parent count     : int32 * n_constraints ]
+ *   [ parents          : int32 * n_constraint_parents ]
+ *   [ weights          : float64 * n_constraint_parents ]
+ *   per field:
+ *   [ name length : uint32 ][ name ][ dtype : uint8 (0 = int32, 1 = float64) ]
+ *   [ count : uint64 ][ values ]
+ *
+ * A constraint row gives a hanging node's value as a weighted sum of its
+ * parents'. Element offsets follow from the types, so they are not stored.
+ * This build holds T3 or T4 meshes whose hanging nodes are edge midpoints
+ * (two parents, weight 1/2 each); read() rejects anything else.
  */
 #pragma once
 
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -31,14 +43,16 @@
 
 namespace amr::simplex::io {
 
-static_assert(std::endian::native == std::endian::little, "SMX1 is written in host byte order");
+static_assert(std::endian::native == std::endian::little, "SMX2 is written in host byte order");
 static_assert(sizeof(Point) == 3 * sizeof(double), "Point must be three packed doubles");
 
-inline constexpr std::array<char, 4> kMagic{'S', 'M', 'X', '1'};
+inline constexpr std::array<char, 4> kMagic{'S', 'M', 'X', '2'};
+inline constexpr std::uint8_t kT3 = 0, kT4 = 4;
 
 struct Payload {
     Mesh mesh;
-    std::vector<Index> indices;
+    std::map<std::string, std::vector<Index>> ints;
+    std::map<std::string, std::vector<double>> doubles;
 };
 
 namespace detail {
@@ -49,76 +63,135 @@ void put(std::ofstream& out, std::span<const T> values) {
               static_cast<std::streamsize>(values.size_bytes()));
 }
 
+/// Reads `count` values after checking they fit in what is left of the file.
 template <class T>
-void get(std::ifstream& in, std::span<T> values, const std::string& path) {
-    in.read(reinterpret_cast<char*>(values.data()),
-            static_cast<std::streamsize>(values.size_bytes()));
+std::vector<T> take(std::ifstream& in,
+                    std::uint64_t count,
+                    std::uint64_t& left,
+                    const std::string& path) {
+    if (count > left / sizeof(T))
+        throw std::runtime_error("SMX2: " + path + " is truncated or its counts are corrupt");
+    left -= count * sizeof(T);
+    std::vector<T> v(static_cast<std::size_t>(count));
+    in.read(reinterpret_cast<char*>(v.data()), static_cast<std::streamsize>(count * sizeof(T)));
     if (!in)
-        throw std::runtime_error("SMX1: " + path + " is truncated");
+        throw std::runtime_error("SMX2: " + path + " is truncated");
+    return v;
+}
+
+template <class T>
+T take_one(std::ifstream& in, std::uint64_t& left, const std::string& path) {
+    return take<T>(in, 1, left, path)[0];
 }
 
 }  // namespace detail
 
-inline void write(const std::string& path, const Mesh& mesh, std::span<const Index> indices) {
+inline void write(const std::string& path,
+                  const Mesh& mesh,
+                  const std::map<std::string, std::vector<Index>>& ints = {},
+                  const std::map<std::string, std::vector<double>>& doubles = {}) {
     std::ofstream out(path, std::ios::binary);
     if (!out)
-        throw std::runtime_error("SMX1: cannot open " + path + " for writing");
+        throw std::runtime_error("SMX2: cannot open " + path + " for writing");
     const auto dim = static_cast<std::uint32_t>(mesh.dim);
-    const std::array<std::uint64_t, 4> counts{mesh.pos.size(),
-                                              static_cast<std::uint64_t>(mesh.num_elements()),
+    const auto n_elements = static_cast<std::uint64_t>(mesh.num_elements());
+    const std::array<std::uint64_t, 5> counts{mesh.pos.size(),
+                                              n_elements,
                                               mesh.hn.size(),
-                                              indices.size()};
+                                              2 * mesh.hn.size(),
+                                              ints.size() + doubles.size()};
     out.write(kMagic.data(), kMagic.size());
     detail::put(out, std::span<const std::uint32_t>(&dim, 1));
     detail::put(out, std::span<const std::uint64_t>(counts));
     detail::put(out, std::span<const Point>(mesh.pos));
+    const std::vector<std::uint8_t> type(n_elements, mesh.dim == 2 ? kT3 : kT4);
+    detail::put(out, std::span<const std::uint8_t>(type));
     detail::put(out, std::span<const Index>(mesh.con));
-    detail::put(out, std::span<const std::array<Index, 3>>(mesh.hn));
-    detail::put(out, indices);
+    std::vector<Index> node, count, parent;
+    for (const auto& h : mesh.hn) {
+        node.push_back(h[0]);
+        count.push_back(2);
+        parent.insert(parent.end(), {h[1], h[2]});
+    }
+    const std::vector<double> weight(parent.size(), 0.5);
+    detail::put(out, std::span<const Index>(node));
+    detail::put(out, std::span<const Index>(count));
+    detail::put(out, std::span<const Index>(parent));
+    detail::put(out, std::span<const double>(weight));
+    const auto put_name = [&out](const std::string& name, std::uint8_t dtype, std::uint64_t n) {
+        const auto len = static_cast<std::uint32_t>(name.size());
+        detail::put(out, std::span<const std::uint32_t>(&len, 1));
+        out.write(name.data(), static_cast<std::streamsize>(name.size()));
+        detail::put(out, std::span<const std::uint8_t>(&dtype, 1));
+        detail::put(out, std::span<const std::uint64_t>(&n, 1));
+    };
+    for (const auto& [name, values] : ints) {
+        put_name(name, 0, values.size());
+        detail::put(out, std::span<const Index>(values));
+    }
+    for (const auto& [name, values] : doubles) {
+        put_name(name, 1, values.size());
+        detail::put(out, std::span<const double>(values));
+    }
     if (!out)
-        throw std::runtime_error("SMX1: failed writing " + path);
+        throw std::runtime_error("SMX2: failed writing " + path);
 }
 
 inline Payload read(const std::string& path) {
-    std::ifstream in(path, std::ios::binary | std::ios::ate);
+    std::ifstream in(path, std::ios::binary);
     if (!in)
-        throw std::runtime_error("SMX1: cannot open " + path);
-    const auto size = static_cast<std::uint64_t>(in.tellg());
-    in.seekg(0);
+        throw std::runtime_error("SMX2: cannot open " + path);
+    std::uint64_t left = std::filesystem::file_size(path);
 
-    std::array<char, 4> magic{};
-    std::uint32_t dim = 0;
-    std::array<std::uint64_t, 4> counts{};
-    detail::get(in, std::span<char>(magic), path);
-    if (magic != kMagic)
-        throw std::runtime_error("SMX1: " + path + " is not an SMX1 file");
-    detail::get(in, std::span<std::uint32_t>(&dim, 1), path);
+    const auto magic = detail::take<char>(in, 4, left, path);
+    if (!std::equal(magic.begin(), magic.end(), kMagic.begin()))
+        throw std::runtime_error("SMX2: " + path + " is not an SMX2 file");
+    const auto dim = detail::take_one<std::uint32_t>(in, left, path);
     if (dim != 2 && dim != 3)
-        throw std::runtime_error("SMX1: dim must be 2 or 3");
-    detail::get(in, std::span<std::uint64_t>(counts), path);
-
-    // Check the sizes against the file before allocating anything.
-    const auto [n_nodes, n_elements, n_hanging, n_indices] = counts;
-    constexpr std::uint64_t kMax = static_cast<std::uint64_t>(std::numeric_limits<Index>::max());
-    if (n_nodes > kMax || n_elements > kMax || n_hanging > kMax || n_indices > kMax)
-        throw std::runtime_error("SMX1: counts exceed the index type");
-    const std::uint64_t expected =
-        kMagic.size() + sizeof dim + sizeof counts + n_nodes * sizeof(Point) +
-        (n_elements * (dim + 1) + 3 * n_hanging + n_indices) * sizeof(Index);
-    if (size != expected)
-        throw std::runtime_error("SMX1: " + path + " has " + std::to_string(size) +
-                                 " bytes, expected " + std::to_string(expected));
+        throw std::runtime_error("SMX2: dim must be 2 or 3");
+    const auto counts = detail::take<std::uint64_t>(in, 5, left, path);
+    constexpr auto kMax = static_cast<std::uint64_t>(std::numeric_limits<Index>::max());
+    for (std::size_t i = 0; i < 4; ++i)
+        if (counts[i] > kMax)
+            throw std::runtime_error("SMX2: counts exceed the index type");
 
     Payload p;
     p.mesh.dim = static_cast<int>(dim);
-    p.mesh.pos.resize(n_nodes);
-    p.mesh.con.resize(n_elements * (dim + 1));
-    p.mesh.hn.resize(n_hanging);
-    p.indices.resize(n_indices);
-    detail::get(in, std::span<Point>(p.mesh.pos), path);
-    detail::get(in, std::span<Index>(p.mesh.con), path);
-    detail::get(in, std::span<std::array<Index, 3>>(p.mesh.hn), path);
-    detail::get(in, std::span<Index>(p.indices), path);
+    p.mesh.pos = detail::take<Point>(in, counts[0], left, path);
+    const auto type = detail::take<std::uint8_t>(in, counts[1], left, path);
+    const std::uint8_t expected = dim == 2 ? kT3 : kT4;
+    for (auto t : type)
+        if (t != expected)
+            throw std::runtime_error("SMX2: this build reads only T3 (2D) or T4 (3D) meshes");
+    p.mesh.con = detail::take<Index>(in, counts[1] * (dim + 1), left, path);
+    const auto node = detail::take<Index>(in, counts[2], left, path);
+    const auto count = detail::take<Index>(in, counts[2], left, path);
+    const auto parent = detail::take<Index>(in, counts[3], left, path);
+    const auto weight = detail::take<double>(in, counts[3], left, path);
+    if (counts[3] != 2 * counts[2])
+        throw std::runtime_error("SMX2: this build reads only two-parent constraints");
+    for (std::size_t r = 0; r < node.size(); ++r) {
+        if (count[r] != 2 || weight[2 * r] != 0.5 || weight[2 * r + 1] != 0.5)
+            throw std::runtime_error("SMX2: this build reads only edge-midpoint constraints");
+        p.mesh.hn.push_back({node[r], parent[2 * r], parent[2 * r + 1]});
+    }
+    for (std::uint64_t f = 0; f < counts[4]; ++f) {
+        const auto len = detail::take_one<std::uint32_t>(in, left, path);
+        const auto chars = detail::take<char>(in, len, left, path);
+        const std::string name(chars.begin(), chars.end());
+        const auto dtype = detail::take_one<std::uint8_t>(in, left, path);
+        const auto n = detail::take_one<std::uint64_t>(in, left, path);
+        if (p.ints.contains(name) || p.doubles.contains(name))
+            throw std::runtime_error("SMX2: " + path + " repeats the field \"" + name + "\"");
+        if (dtype == 0)
+            p.ints[name] = detail::take<Index>(in, n, left, path);
+        else if (dtype == 1)
+            p.doubles[name] = detail::take<double>(in, n, left, path);
+        else
+            throw std::runtime_error("SMX2: unknown field type in " + path);
+    }
+    if (left != 0)
+        throw std::runtime_error("SMX2: " + path + " has trailing bytes");
     return p;
 }
 
