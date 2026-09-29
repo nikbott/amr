@@ -67,6 +67,23 @@ elements with hanging nodes — the foundation for the upcoming `common/oracle_s
 DIC-integration path. Their interpolation-matrix construction (§4) is the
 template for `mesh_io`'s exported `[L]`/`S` matrix.
 
+## Simplicial refinement
+
+**[Bey1995]** J. Bey. *Tetrahedral grid refinement.*
+Computing, **55**(4), 355–378 (1995). DOI: [10.1007/BF02238487](https://doi.org/10.1007/BF02238487).
+
+Red refinement of a tetrahedron into 4 corner children plus an inner
+octahedron cut along one of its 3 diagonals. `simplex/` uses the corner and
+octahedron split, but picks the diagonal by quality ([Zhang1995]) rather than
+by Bey's fixed rule.
+
+**[Zhang1995]** S. Zhang. *Successive subdivisions of tetrahedra and multigrid
+methods on tetrahedral meshes.* Houston J. Math., **21**, 541–556 (1995).
+
+Successive red subdivision keeps a bounded number of tetrahedron shapes when the
+inner diagonal is chosen well. `simplex/` takes the diagonal whose worst child has
+the highest mean-ratio quality, which keeps a structured seed's shape classes.
+
 ## Adaptive refinement strategy
 
 **[Doerfler1996]** W. Dörfler. *A convergent adaptive algorithm for Poisson's equation.*

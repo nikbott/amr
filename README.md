@@ -25,6 +25,12 @@ Each C++ backend has the same module layout: `core` (Morton + strong types),
 `tree` (refine/balance/coarsen), `physics` (oracles), `viz` (SVG/VTK), plus
 `main` and `tests`.
 
+`simplex/` is separate from the octree: header-only red refinement of the
+unstructured triangle/tetrahedron meshes the FE-DIC solver correlates on
+([Bey1995], [Zhang1995]), with hanging nodes, 1-irregular balance and the
+prolongation. Tests: Catch2 (`simplex/tests.cpp`), built by CMake as
+`amr_simplex_tests`.
+
 ## Invariants
 
 - **Sorted leaves:** `leaf_codes` is ascending; `refine`/`coarsen` re-establish this.

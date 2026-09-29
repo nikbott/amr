@@ -138,6 +138,27 @@ if(BUILD_TESTING)
   add_test(NAME AllTests COMMAND amr_tests)
 endif()
 
+# --- Simplicial module (simplex/) ---------------------------------------------
+# Header-only red refinement of unstructured T3/T4 meshes, the FE-DIC side of
+# the engine. Independent of the octree core, so it takes no OpenMP.
+add_library(simplex INTERFACE)
+target_include_directories(simplex
+                           INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/simplex)
+if(NOT MSVC)
+  target_compile_options(simplex INTERFACE -Wall -Wextra -Wpedantic
+                                           -Wconversion -Wshadow -Wformat=2)
+  if(WARNINGS_AS_ERRORS)
+    target_compile_options(simplex INTERFACE -Werror)
+  endif()
+endif()
+
+if(BUILD_TESTING)
+  add_executable(amr_simplex_tests simplex/tests.cpp)
+  target_link_libraries(amr_simplex_tests PRIVATE simplex
+                                                  Catch2::Catch2WithMain)
+  add_test(NAME SimplexTests COMMAND amr_simplex_tests)
+endif()
+
 # --- Sanitizers (Correctness/Debug) -------------------------------------------
 if(ENABLE_SANITIZERS AND NOT MSVC)
   # Automatically disable sanitizers for Profiling builds to ensure accuracy
@@ -150,8 +171,10 @@ if(ENABLE_SANITIZERS AND NOT MSVC)
     target_link_options(amr PRIVATE -fsanitize=address,undefined)
 
     if(BUILD_TESTING)
-      target_compile_options(amr_tests PRIVATE -fsanitize=address,undefined)
-      target_link_options(amr_tests PRIVATE -fsanitize=address,undefined)
+      foreach(t amr_tests amr_simplex_tests)
+        target_compile_options(${t} PRIVATE -fsanitize=address,undefined)
+        target_link_options(${t} PRIVATE -fsanitize=address,undefined)
+      endforeach()
     endif()
   endif()
 endif()
