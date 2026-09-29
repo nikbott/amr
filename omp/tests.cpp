@@ -843,6 +843,56 @@ TEST_CASE("ScalarFieldOracle Dörfler marking + coarsening (oracle #11)", "[orac
     }
 }
 
+TEST_CASE("ScalarFieldOracle marks a minimum-size set covering theta", "[oracle][dorfler]") {
+    // Dorfler bulk marking [Doerfler1996] in its squared form: the marked set
+    // covers theta of the total squared error and no smaller set does. Checked
+    // against every subset of 16 leaves (2^16) for distinct random errors.
+    const int max_lvl = 4;
+    Quadtree tree(max_lvl);
+    tree.refine([](const Node&, int) { return true; });
+    tree.refine([](const Node&, int) { return true; });
+    std::vector<uint64_t> codes;
+    std::vector<uint8_t> levels;
+    snapshot(tree, codes, levels);
+    REQUIRE(codes.size() == 16);
+
+    std::mt19937 rng(20260929);
+    std::uniform_real_distribution<double> dist(0.1, 10.0);
+    std::vector<double> err(16);
+    for (auto& e : err)
+        e = dist(rng);
+    double total = 0.0;
+    for (double e : err)
+        total += e * e;
+
+    for (double theta : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+        INFO("theta=" << theta);
+        ScalarFieldOracle<2> oracle(codes, levels, err, theta, 0.0, 0, max_lvl);
+        double covered = 0.0;
+        int marked = 0;
+        size_t i = 0;
+        for (const auto& n : tree) {
+            if (oracle(n, max_lvl)) {
+                covered += err[i] * err[i];
+                ++marked;
+            }
+            ++i;
+        }
+        REQUIRE(covered >= theta * total);
+
+        int smallest = 17;
+        for (uint32_t mask = 1; mask < (1u << 16); ++mask) {
+            double s = 0.0;
+            for (int k = 0; k < 16; ++k)
+                if (mask & (1u << k))
+                    s += err[k] * err[k];
+            if (s >= theta * total)
+                smallest = std::min(smallest, __builtin_popcount(mask));
+        }
+        REQUIRE(marked == smallest);
+    }
+}
+
 TEST_CASE("Safety & Edge Cases", "[safety]") {
     // Only need one dimension type to test general logic logic
     using TestType = Quadtree;
