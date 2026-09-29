@@ -30,6 +30,9 @@ unstructured triangle/tetrahedron meshes the FE-DIC solver correlates on
 ([Bey1995], [Zhang1995]), with hanging nodes, 1-irregular balance and the
 prolongation; structured seeds (`structured.hpp`); and one solver cycle,
 `adapt` = marking (`common/marking.hpp`, [Doerfler1996]) → balance → refine.
+Element shapes come from one model (`element.hpp`): products of simplices
+(T3, T4, Q4, H8, prism) refined factor by factor with Freudenthal's subdivision
+([Freudenthal1942], [Bey2000]), plus a hand-made pyramid.
 Tests: Catch2 (`simplex/test*.cpp`), built by CMake as `amr_simplex_tests`.
 `amr_simplex {refine|balance|adapt|structured} IN OUT` runs it on SMX2 files
 (`simplex/io.hpp`), the exchange format MATLAB drives it through.
