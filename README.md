@@ -29,7 +29,8 @@ Each C++ backend has the same module layout: `core` (Morton + strong types),
 
 - **Sorted leaves:** `leaf_codes` is ascending; `refine`/`coarsen` re-establish this.
 - **Unique leaves:** no duplicate codes; no leaf is an ancestor of another.
-- **2:1 balance:** after `balance()`, face-adjacent leaves differ by ≤ 1 level.
+- **2:1 balance:** after `balance()`, face-adjacent leaves (and, in 3D, edge-adjacent
+  leaves) differ by ≤ 1 level; corner-only neighbours are not constrained.
 - **Partition of unity (MPI):** summed leaf volumes across ranks == 1.0
   (checked by `verify_global()`).
 
