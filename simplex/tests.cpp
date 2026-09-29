@@ -85,7 +85,7 @@ TEST_CASE("The octahedron is cut along the diagonal with the best worst child", 
         const std::vector<Index> list{0};
         const auto r = refine(m, list);
         double worst_inner = 1e300;
-        for (Index e = 4; e < 8; ++e) {  // children 4..7 fill the octahedron
+        for (Index e = 1; e < 5; ++e) {  // children 1..4 fill the octahedron
             const auto v = r.mesh.element(e);
             const auto p = [&](std::size_t i) {
                 return r.mesh.pos[static_cast<std::size_t>(v[i])];
