@@ -22,7 +22,8 @@
  *   the others take the other diagonal (so the diagonals point towards the
  *   centre when the cell counts are even).
  *
- * All elements are positively oriented.
+ * Nodes and cells are numbered as genMesh numbers them: y fastest, then x,
+ * then z. All elements are positively oriented.
  */
 #pragma once
 
@@ -105,21 +106,21 @@ inline constexpr std::array<std::array<int, 4>, 6> kCellTets{{
     if (d == 2)
         axis[2] = {0.0};
     const std::array<Index, 3> n{nodes[0], nodes[1], d == 3 ? nodes[2] : 1};
-    const auto id = [&n](Index i, Index j, Index k) { return (k * n[1] + j) * n[0] + i; };
+    const auto id = [&n](Index i, Index j, Index k) { return (k * n[0] + i) * n[1] + j; };
 
     Mesh m;
     m.dim = static_cast<int>(d);
     for (Index k = 0; k < n[2]; ++k)
-        for (Index j = 0; j < n[1]; ++j)
-            for (Index i = 0; i < n[0]; ++i)
+        for (Index i = 0; i < n[0]; ++i)
+            for (Index j = 0; j < n[1]; ++j)
                 m.pos.push_back({axis[0][static_cast<std::size_t>(i)],
                                  axis[1][static_cast<std::size_t>(j)],
                                  axis[2][static_cast<std::size_t>(k)]});
 
     if (d == 2) {
         const Index half_x = (n[0] - 1) / 2, half_y = (n[1] - 1) / 2;
-        for (Index j = 0; j + 1 < n[1]; ++j)
-            for (Index i = 0; i + 1 < n[0]; ++i) {
+        for (Index i = 0; i + 1 < n[0]; ++i)
+            for (Index j = 0; j + 1 < n[1]; ++j) {
                 const Index a = id(i, j, 0), b = id(i + 1, j, 0);          // bottom edge
                 const Index c = id(i + 1, j + 1, 0), e = id(i, j + 1, 0);  // top edge
                 if ((i < half_x) == (j < half_y))
@@ -130,8 +131,8 @@ inline constexpr std::array<std::array<int, 4>, 6> kCellTets{{
         return m;
     }
     for (Index k = 0; k + 1 < n[2]; ++k)
-        for (Index j = 0; j + 1 < n[1]; ++j)
-            for (Index i = 0; i + 1 < n[0]; ++i)
+        for (Index i = 0; i + 1 < n[0]; ++i)
+            for (Index j = 0; j + 1 < n[1]; ++j)
                 for (const auto& tet : detail::kCellTets)
                     for (int bits : tet)
                         m.con.push_back(

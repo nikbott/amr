@@ -166,21 +166,27 @@ inline double tet_quality(const Point& a, const Point& b, const Point& c, const 
            std::max(sum_l2, std::numeric_limits<double>::epsilon());
 }
 
-// Local numbering of a refined element: corners 0..dim, then edge midpoints.
-// Triangle: 3 = m01, 4 = m12, 5 = m02.
-inline constexpr std::array<std::array<int, 2>, 3> kTriEdges{{{0, 1}, {1, 2}, {0, 2}}};
+// Local numbering of a refined element, as the solver's MATLAB meshes number
+// it (mesh_subdivide_list, observed from its output): corners 0..dim, then
+// the edge midpoints in the order they are created. The correlation's
+// round-off depends on node and element order, so this numbering keeps every
+// downstream result bit for bit.
+// Triangle: 3 = m12, 4 = m02, 5 = m01.
+inline constexpr std::array<std::array<int, 2>, 3> kTriEdges{{{1, 2}, {0, 2}, {0, 1}}};
 inline constexpr std::array<std::array<int, 3>, 4> kTriChildren{
-    {{0, 3, 5}, {3, 1, 4}, {5, 4, 2}, {3, 4, 5}}};
-// Tetrahedron: 4 = m01, 5 = m02, 6 = m03, 7 = m12, 8 = m13, 9 = m23.
+    {{2, 4, 3}, {3, 5, 1}, {4, 0, 5}, {5, 3, 4}}};
+// Tetrahedron: 4 = m13, 5 = m03, 6 = m01, 7 = m23, 8 = m12, 9 = m02. Children:
+// one corner, the 4 octahedron children, then the other three corners.
 inline constexpr std::array<std::array<int, 2>, 6> kTetEdges{
-    {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}}};
-inline constexpr std::array<std::array<int, 4>, 4> kTetCorners{
-    {{0, 4, 5, 6}, {4, 1, 7, 8}, {5, 7, 2, 9}, {6, 8, 9, 3}}};
+    {{1, 3}, {0, 3}, {0, 1}, {2, 3}, {1, 2}, {0, 2}}};
+inline constexpr std::array<int, 4> kTetFirstCorner{3, 7, 4, 5};
+inline constexpr std::array<std::array<int, 4>, 3> kTetLastCorners{
+    {{4, 8, 1, 6}, {5, 9, 6, 0}, {7, 2, 8, 9}}};
 // The octahedron's 4 children for each diagonal: m13-m02, m01-m23, m03-m12.
 inline constexpr std::array<std::array<std::array<int, 4>, 4>, 3> kOctahedron{{
-    {{{8, 4, 6, 5}, {8, 7, 4, 5}, {8, 9, 7, 5}, {8, 6, 9, 5}}},
-    {{{4, 9, 6, 8}, {4, 9, 5, 6}, {4, 9, 7, 5}, {4, 9, 8, 7}}},
-    {{{6, 7, 8, 4}, {6, 7, 4, 5}, {6, 7, 5, 9}, {6, 7, 9, 8}}},
+    {{{4, 6, 5, 9}, {4, 8, 6, 9}, {4, 7, 8, 9}, {4, 5, 7, 9}}},
+    {{{6, 7, 5, 4}, {6, 7, 9, 5}, {6, 7, 8, 9}, {6, 7, 4, 8}}},
+    {{{5, 8, 4, 6}, {5, 8, 6, 9}, {5, 8, 9, 7}, {5, 8, 7, 4}}},
 }};
 
 /// The octahedron split whose worst child quality is highest; first wins ties.
@@ -282,9 +288,11 @@ inline std::vector<Index> detail::closure(const Mesh& mesh, std::span<const Inde
  * @param elements  Elements to refine (any order; duplicates are ignored),
  *   closed under balance_closure(). An unbalanced list can hang a node on
  *   a face; that node is not tracked and a later refinement duplicates it.
- * @return The refined mesh and its prolongation. Old nodes keep their
- *   indices; new nodes follow in order of first use. Each element is
- *   replaced in place by its children, in the child order above.
+ * @return The refined mesh and its prolongation, numbered as the solver's
+ *   MATLAB meshes were: old nodes keep their indices and new nodes follow in
+ *   order of creation; the children of the refined elements come first,
+ *   parent by parent in ascending order and in the order above, then the
+ *   other elements in their order.
  */
 [[nodiscard]] inline Refinement refine(const Mesh& mesh, std::span<const Index> elements) {
     detail::validate(mesh);
@@ -334,11 +342,9 @@ inline Refinement detail::refine_valid(const Mesh& mesh, std::span<const Index> 
     };
 
     for (Index e = 0; e < n_elem; ++e) {
-        const auto v = mesh.element(e);
-        if (!marked[static_cast<std::size_t>(e)]) {
-            m.con.insert(m.con.end(), v.begin(), v.end());
+        if (!marked[static_cast<std::size_t>(e)])
             continue;
-        }
+        const auto v = mesh.element(e);
         if (mesh.dim == 2) {
             std::array<Index, 6> local{v[0], v[1], v[2]};
             for (std::size_t i = 0; i < detail::kTriEdges.size(); ++i)
@@ -354,12 +360,18 @@ inline Refinement detail::refine_valid(const Mesh& mesh, std::span<const Index> 
             std::array<Point, 10> p;
             for (std::size_t i = 0; i < p.size(); ++i)
                 p[i] = m.pos[static_cast<std::size_t>(local[i])];
-            for (const auto& child : detail::kTetCorners)
-                emit(local, child);
+            emit(local, detail::kTetFirstCorner);
             for (const auto& child : detail::best_octahedron_split(p))
+                emit(local, child);
+            for (const auto& child : detail::kTetLastCorners)
                 emit(local, child);
         }
     }
+    for (Index e = 0; e < n_elem; ++e)
+        if (!marked[static_cast<std::size_t>(e)]) {
+            const auto v = mesh.element(e);
+            m.con.insert(m.con.end(), v.begin(), v.end());
+        }
 
     // A midpoint hangs while some element still has its parent edge.
     const auto n_old = static_cast<Index>(mesh.pos.size());

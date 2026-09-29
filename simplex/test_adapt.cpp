@@ -232,7 +232,8 @@ TEST_CASE("2D diagonals follow genMesh's quadrants", "[structured]") {
             structured(std::vector<double>{10.0, 10.0}, nodes, std::vector<double>{0.0, 0.0});
         const double hx = 10.0 / (nodes[0] - 1), hy = 10.0 / (nodes[1] - 1);
         for (Index e = 0; e < m.num_elements(); e += 2) {  // 2 consecutive triangles per cell
-            const Index cell = e / 2, i = cell % (nodes[0] - 1), j = cell / (nodes[0] - 1);
+            const Index cell = e / 2, j = cell % (nodes[1] - 1),
+                        i = cell / (nodes[1] - 1);  // y fastest
             const Point low{i * hx, j * hy, 0.0}, high{(i + 1) * hx, (j + 1) * hy, 0.0};
             bool has_low = false, has_high = false;
             for (Index v : m.element(e)) {
