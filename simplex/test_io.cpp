@@ -106,6 +106,9 @@ TEST_CASE("SMX2 rejects foreign, truncated, padded and unsupported files", "[sim
     patch(path, 8, std::string(reinterpret_cast<const char*>(&huge), sizeof huge));
     CHECK_THROWS_AS(io::read(path.string()), std::runtime_error);  // count beyond the file
 
+    io::write(path.string(), m, {{"elements", {0}}}, {{"elements", {1.0}}});  // one name, twice
+    CHECK_THROWS_AS(io::read(path.string()), std::runtime_error);
+
     std::filesystem::remove(path);
     CHECK_THROWS_AS(io::read(path.string()), std::runtime_error);
 }

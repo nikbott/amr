@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <span>
@@ -40,8 +42,9 @@ struct AdaptParams {
 struct Adaptation {
     AdaptStatus status = AdaptStatus::no_candidates;
     marking::Marking marking;
-    std::vector<Index> balanced;  ///< ascending; empty unless refined or stagnated
-    Refinement refinement;        ///< the refined mesh; empty unless refined or stagnated
+    std::vector<Index> balanced;      ///< ascending; empty unless refined or stagnated
+    Refinement refinement;            ///< the refined mesh; empty unless refined or stagnated
+    std::array<double, 3> seconds{};  ///< wall time of marking, balance and refinement
 };
 
 /// Area (T3) or volume (T4) of element e.
@@ -77,14 +80,22 @@ struct Adaptation {
     const auto n = static_cast<std::size_t>(mesh.num_elements());
     if (error.size() != n || ratio.size() != n)
         throw std::invalid_argument("adapt: error and ratio need one value per element");
-    if (p.min_growth_fraction < 0.0 || p.min_growth_fraction >= 1.0)
+    if (!(p.min_growth_fraction >= 0.0 && p.min_growth_fraction < 1.0))
         throw std::invalid_argument("adapt: min_growth_fraction must be in [0, 1)");
 
-    const auto length = element_lengths(mesh);
+    using Clock = std::chrono::steady_clock;
+    const auto since = [](Clock::time_point t0) {
+        return std::chrono::duration<double>(Clock::now() - t0).count();
+    };
+    auto t0 = Clock::now();
+    // Lengths are needed only for the floor.
+    const auto length =
+        p.marking.min_element_length > 0.0 ? element_lengths(mesh) : std::vector<double>{};
     const std::vector<Index> growth(n, mesh.dim == 2 ? 3 : 7);  // red refinement: 4 or 8 children
 
     Adaptation a;
     a.marking = marking::mark(error, ratio, length, growth, p.marking);
+    a.seconds[0] = since(t0);
     switch (a.marking.status) {
         case marking::Status::no_candidates:
             a.status = AdaptStatus::no_candidates;
@@ -98,8 +109,12 @@ struct Adaptation {
         case marking::Status::selected:
             break;
     }
-    a.balanced = balance_closure(mesh, a.marking.selected);
-    a.refinement = refine(mesh, a.balanced);
+    t0 = Clock::now();
+    a.balanced = detail::closure(mesh, a.marking.selected);
+    a.seconds[1] = since(t0);
+    t0 = Clock::now();
+    a.refinement = detail::refine_valid(mesh, a.balanced);
+    a.seconds[2] = since(t0);
     const double grown =
         static_cast<double>(a.refinement.mesh.num_elements() - mesh.num_elements()) /
         static_cast<double>(std::max<std::size_t>(n, 1));

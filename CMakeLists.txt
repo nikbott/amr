@@ -152,7 +152,8 @@ if(NOT MSVC)
   endif()
 endif()
 
-# Command-line front end over SMX1 files, for the MATLAB differential tests.
+# Command-line front end over SMX2 files, the transport MATLAB drives it
+# through.
 add_executable(amr_simplex simplex/cli.cpp)
 target_link_libraries(amr_simplex PRIVATE simplex)
 

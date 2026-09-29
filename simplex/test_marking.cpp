@@ -197,15 +197,49 @@ TEST_CASE("The element ceiling admits the parents that fit, else stops", "[marki
     p.max_elements = 10 + 3 * 7;  // exactly 3 parents: the ceiling itself is allowed
     CHECK(run(c, p).selected == std::vector<Index>{9, 8, 7});
     p.max_elements = 10 + 6;  // not even one
-    CHECK(run(c, p).status == Status::element_ceiling);
+    const auto stopped = run(c, p);
+    CHECK(stopped.status == Status::element_ceiling);
+    CHECK(stopped.selected.empty());  // nothing was selected
+    CHECK(stopped.marked.size() == 10);
     p.max_elements = 5;  // already above
     CHECK(run(c, p).status == Status::element_ceiling);
+    p.max_elements = 10 + 7.5;  // fractional, as MATLAB allowed: one parent fits
+    CHECK(run(c, p).selected == std::vector<Index>{9});
+    p.max_elements = 0.5;  // on, and already exceeded
+    CHECK(run(c, p).status == Status::element_ceiling);
+    p.max_elements = -3;  // off
+    CHECK(run(c, p).selected.size() == 10);
+}
+
+TEST_CASE("Parameters behave as the solver's did", "[marking]") {
+    Case c = uniform_case(6);
+    c.ratio.assign(6, 2.0);
+    std::iota(c.error.begin(), c.error.end(), 1.0);
+    Params p;
+    p.max_refine_fraction = 1.0;
+    p.theta = 1.2;  // unreachable: every candidate
+    CHECK(run(c, p).marked.size() == 6);
+    p.theta = 0.3;
+    p.min_element_length = -1.0;  // off, like 0
+    c.length.assign(6, 1e-9);
+    CHECK(run(c, p).status == Status::selected);
+    c.length.clear();  // lengths are not needed with the floor off
+    CHECK(run(c, p).status == Status::selected);
 }
 
 TEST_CASE("Bad input is rejected", "[marking]") {
     Case c = uniform_case(3);
     Params p;
-    p.theta = 1.5;
+    p.theta = std::nan("");
+    CHECK_THROWS_AS(run(c, p), std::invalid_argument);
+    p = {};
+    p.theta = -0.1;
+    CHECK_THROWS_AS(run(c, p), std::invalid_argument);
+    p = {};
+    p.min_element_length = std::nan("");
+    CHECK_THROWS_AS(run(c, p), std::invalid_argument);
+    p = {};
+    p.max_elements = std::numeric_limits<double>::infinity();
     CHECK_THROWS_AS(run(c, p), std::invalid_argument);
     p = {};
     p.max_refine_fraction = 0.0;
@@ -215,5 +249,6 @@ TEST_CASE("Bad input is rejected", "[marking]") {
     CHECK_THROWS_AS(run(c, p), std::invalid_argument);
     c = uniform_case(3);
     c.length.pop_back();
+    p.min_element_length = 0.5;  // the floor needs every length
     CHECK_THROWS_AS(run(c, p), std::invalid_argument);
 }

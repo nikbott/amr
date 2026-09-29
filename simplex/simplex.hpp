@@ -218,9 +218,19 @@ inline const std::array<std::array<int, 4>, 4>& best_octahedron_split(
  *
  * @return The closed list, ascending and without duplicates.
  */
+namespace detail {
+inline std::vector<Index> closure(const Mesh& mesh, std::span<const Index> elements);
+inline Refinement refine_valid(const Mesh& mesh, std::span<const Index> elements);
+}  // namespace detail
+
 [[nodiscard]] inline std::vector<Index> balance_closure(const Mesh& mesh,
                                                         std::span<const Index> elements) {
     detail::validate(mesh);
+    return detail::closure(mesh, elements);
+}
+
+/// The closure of a validated mesh (see balance_closure).
+inline std::vector<Index> detail::closure(const Mesh& mesh, std::span<const Index> elements) {
     const Index n_elem = mesh.num_elements();
     std::vector<char> selected(static_cast<std::size_t>(n_elem), 0);
     std::vector<Index> work;
@@ -278,6 +288,11 @@ inline const std::array<std::array<int, 4>, 4>& best_octahedron_split(
  */
 [[nodiscard]] inline Refinement refine(const Mesh& mesh, std::span<const Index> elements) {
     detail::validate(mesh);
+    return detail::refine_valid(mesh, elements);
+}
+
+/// The refinement of a validated mesh (see refine).
+inline Refinement detail::refine_valid(const Mesh& mesh, std::span<const Index> elements) {
     const Index n_elem = mesh.num_elements();
     std::vector<char> marked(static_cast<std::size_t>(n_elem), 0);
     for (Index e : elements) {

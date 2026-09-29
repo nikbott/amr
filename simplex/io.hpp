@@ -181,6 +181,8 @@ inline Payload read(const std::string& path) {
         const std::string name(chars.begin(), chars.end());
         const auto dtype = detail::take_one<std::uint8_t>(in, left, path);
         const auto n = detail::take_one<std::uint64_t>(in, left, path);
+        if (p.ints.contains(name) || p.doubles.contains(name))
+            throw std::runtime_error("SMX2: " + path + " repeats the field \"" + name + "\"");
         if (dtype == 0)
             p.ints[name] = detail::take<Index>(in, n, left, path);
         else if (dtype == 1)

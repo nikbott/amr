@@ -12,10 +12,11 @@
  *                                  = [theta, max_refine_fraction,
  *                                  min_element_length, max_elements,
  *                                  min_growth_fraction]. OUT: the refined mesh
- *                                  (IN's if nothing was refined), int "status"
+ *                                  (empty if nothing was refined), int "status"
  *                                  (AdaptStatus), the element sets "flagged",
  *                                  "candidates", "marked", "selected",
- *                                  "balanced", and the prolongation
+ *                                  "balanced", double "seconds" (marking,
+ *                                  balance, refinement), and the prolongation
  *   amr_simplex structured IN OUT  IN: empty mesh + double "dims", "origin",
  *                                  int "nodes". OUT: the seed mesh
  *
@@ -24,6 +25,7 @@
  * per new node), int "prolongation_parents", double "prolongation_weights".
  */
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -79,7 +81,7 @@ void run(const std::string& command, const std::string& in_path, const std::stri
         p.marking.theta = v[0];
         p.marking.max_refine_fraction = v[1];
         p.marking.min_element_length = v[2];
-        p.marking.max_elements = static_cast<std::int64_t>(v[3]);
+        p.marking.max_elements = v[3];
         p.min_growth_fraction = v[4];
         const auto a = adapt(in.mesh, field(in.doubles, "error"), field(in.doubles, "ratio"), p);
         ints["status"] = {static_cast<Index>(a.status)};
@@ -88,10 +90,13 @@ void run(const std::string& command, const std::string& in_path, const std::stri
         ints["marked"] = a.marking.marked;
         ints["selected"] = a.marking.selected;
         ints["balanced"] = a.balanced;
+        doubles["seconds"] = {a.seconds.begin(), a.seconds.end()};
         const bool refined = a.status == AdaptStatus::refined || a.status == AdaptStatus::stagnated;
         if (refined)
             add_prolongation(a.refinement, ints, doubles);
-        io::write(out_path, refined ? a.refinement.mesh : in.mesh, ints, doubles);
+        Mesh unchanged;  // the caller keeps its mesh when nothing was refined
+        unchanged.dim = in.mesh.dim;
+        io::write(out_path, refined ? a.refinement.mesh : unchanged, ints, doubles);
     } else if (command == "structured") {
         io::write(
             out_path,
@@ -106,7 +111,9 @@ void run(const std::string& command, const std::string& in_path, const std::stri
 
 int main(int argc, char** argv) {
     const std::vector<std::string> args(argv + 1, argv + argc);
-    if (args.size() != 3) {
+    const std::vector<std::string> commands{"refine", "balance", "adapt", "structured"};
+    if (args.size() != 3 ||
+        std::find(commands.begin(), commands.end(), args[0]) == commands.end()) {
         std::cerr << "usage: amr_simplex {refine|balance|adapt|structured} IN.smx OUT.smx\n";
         return 2;
     }

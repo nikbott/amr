@@ -22,7 +22,18 @@
  * The arithmetic follows the MATLAB solver it replaces: the total is summed
  * in index order, the prefix sums are accumulated in sorted order and each is
  * divided by the total before the comparison. MATLAB may sum a long vector in
- * blocks, so a prefix that lands within one ulp of `theta` could still differ.
+ * blocks, and computes the length with its own power function, so a prefix
+ * within one ulp of `theta`, or a length within one ulp of the floor, could
+ * still be decided differently; none of the 235 recorded report cycles is.
+ *
+ * Parameters behave as the solver's did: theta > 1 marks every candidate, a
+ * non-positive floor or ceiling is off, and a fractional ceiling admits the
+ * parents whose growth fits in it. Errors must be finite (a NaN error is an
+ * estimator bug, not an input to mark around).
+ *
+ * The octree's ScalarFieldOracle (omp/physics.hpp) keeps its own
+ * threshold-based Dörfler rule, with coarsening; this module is the FE-DIC
+ * solver's.
  */
 #pragma once
 
@@ -41,8 +52,8 @@ using Index = std::int32_t;
 struct Params {
     double theta = 0.30;                ///< Dörfler fraction of the total squared error
     double max_refine_fraction = 0.30;  ///< per-cycle cap, as a fraction of the elements
-    double min_element_length = 0.0;    ///< size floor; 0 disables it
-    std::int64_t max_elements = 0;      ///< element ceiling; 0 disables it
+    double min_element_length = 0.0;    ///< size floor; <= 0 disables it
+    double max_elements = 0.0;          ///< element ceiling; <= 0 disables it
 };
 
 enum class Status { selected, no_candidates, floor_exhausted, element_ceiling };
@@ -59,7 +70,8 @@ struct Marking {
 /**
  * @param error   per-element error e_i (finite, >= 0)
  * @param ratio   per-element refinement ratio; > 1 flags the element
- * @param length  per-element characteristic length V^(1/d)
+ * @param length  per-element characteristic length V^(1/d); may be empty when
+ *                the floor is off
  * @param growth  per-element net elements added by refining it (children - 1)
  */
 [[nodiscard]] inline Marking mark(std::span<const double> error,
@@ -68,13 +80,13 @@ struct Marking {
                                   std::span<const Index> growth,
                                   const Params& p) {
     const std::size_t n = error.size();
-    if (ratio.size() != n || length.size() != n || growth.size() != n)
+    const bool floor_on = p.min_element_length > 0.0;
+    if (ratio.size() != n || growth.size() != n || (floor_on && length.size() != n))
         throw std::invalid_argument("marking: error, ratio, length and growth differ in size");
     if (!std::all_of(error.begin(), error.end(), [](double e) { return std::isfinite(e); }))
         throw std::invalid_argument("marking: errors must be finite");
-    if (!(p.theta >= 0.0 && p.theta <= 1.0) ||
-        !(p.max_refine_fraction > 0.0 && p.max_refine_fraction <= 1.0) ||
-        p.min_element_length < 0.0 || p.max_elements < 0)
+    if (!(p.theta >= 0.0) || !(p.max_refine_fraction > 0.0 && p.max_refine_fraction <= 1.0) ||
+        !std::isfinite(p.min_element_length) || !std::isfinite(p.max_elements))
         throw std::invalid_argument("marking: parameter out of range");
 
     Marking m;
@@ -85,7 +97,7 @@ struct Marking {
         return m;  // no_candidates
 
     m.candidates = m.flagged;
-    if (p.min_element_length > 0.0) {
+    if (floor_on) {
         const double child_floor = 2.0 * p.min_element_length;
         std::erase_if(m.candidates, [&](Index e) {
             return !(length[static_cast<std::size_t>(e)] > child_floor);
@@ -123,9 +135,9 @@ struct Marking {
     if (m.selected.size() > cap)
         m.selected.resize(cap);
 
-    if (p.max_elements > 0) {
-        const std::int64_t budget = p.max_elements - static_cast<std::int64_t>(n);
-        std::int64_t used = 0;
+    if (p.max_elements > 0.0) {
+        const double budget = p.max_elements - static_cast<double>(n);
+        double used = 0.0;
         std::size_t admitted = 0;
         for (Index e : m.selected) {
             used += growth[static_cast<std::size_t>(e)];
@@ -135,6 +147,7 @@ struct Marking {
         }
         if (admitted == 0) {
             m.status = Status::element_ceiling;
+            m.selected.clear();  // nothing was selected
             return m;
         }
         m.selected.resize(admitted);

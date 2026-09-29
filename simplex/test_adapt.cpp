@@ -101,6 +101,7 @@ TEST_CASE("adapt is marking, then balance, then refinement", "[adapt]") {
         CHECK(a.refinement.mesh.con == r.mesh.con);
         CHECK(a.refinement.mesh.hn == r.mesh.hn);
         CHECK(a.refinement.parents == r.parents);
+        CHECK(std::all_of(a.seconds.begin(), a.seconds.end(), [](double t) { return t >= 0.0; }));
         m = a.refinement.mesh;
     }
 }
@@ -134,7 +135,7 @@ TEST_CASE("adapt reports the stop statuses and refines nothing then", "[adapt]")
     p.marking.min_element_length = 10.0;
     CHECK(adapt(m, error, ratio, p).status == AdaptStatus::floor_exhausted);
     p.marking.min_element_length = 0.0;
-    p.marking.max_elements = static_cast<std::int64_t>(n);
+    p.marking.max_elements = static_cast<double>(n);
     CHECK(adapt(m, error, ratio, p).status == AdaptStatus::element_ceiling);
     CHECK_THROWS_AS(adapt(m, std::vector<double>(n - 1, 1.0), ratio, p), std::invalid_argument);
 }
@@ -245,7 +246,27 @@ TEST_CASE("2D diagonals follow genMesh's quadrants", "[structured]") {
     }
 }
 
+TEST_CASE("linspace stays exact at the ends and finite when the span overflows", "[structured]") {
+    const auto y = detail::linspace(-1e308, 1e308, 5);  // b - a overflows
+    CHECK(y.front() == -1e308);
+    CHECK(y.back() == 1e308);
+    CHECK(std::all_of(y.begin(), y.end(), [](double v) { return std::isfinite(v); }));
+    CHECK(std::is_sorted(y.begin(), y.end()));
+    const auto z = detail::linspace(0.0, 1.5e308, 4);  // (b - a) * (n - 2) overflows
+    CHECK(std::all_of(z.begin(), z.end(), [](double v) { return std::isfinite(v); }));
+    CHECK(std::is_sorted(z.begin(), z.end()));
+}
+
 TEST_CASE("Structured input is validated", "[structured]") {
+    const std::vector<double> zero2{0.0, 0.0};
+    CHECK_THROWS_AS(structured(std::vector<double>{-1.0, 1.0}, std::vector<Index>{2, 2}, zero2),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(
+        structured(std::vector<double>{std::nan(""), 1.0}, std::vector<Index>{2, 2}, zero2),
+        std::invalid_argument);
+    CHECK_THROWS_AS(
+        structured(std::vector<double>{1.0, 1.0}, std::vector<Index>{70000, 70000}, zero2),
+        std::overflow_error);
     CHECK_THROWS_AS(
         structured(std::vector<double>{1.0}, std::vector<Index>{2}, std::vector<double>{0.0}),
         std::invalid_argument);

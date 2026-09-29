@@ -19,15 +19,18 @@
  * - 2D: every cell is split along a diagonal chosen per quadrant: cells in the
  *   low half of both axes, or the high half of both (half = the first
  *   floor(cells / 2)), take the diagonal from the low corner to the high one;
- *   the others take the other diagonal. The mesh is symmetric about the box
- *   centre.
+ *   the others take the other diagonal (so the diagonals point towards the
+ *   centre when the cell counts are even).
  *
  * All elements are positively oriented.
  */
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <vector>
@@ -38,12 +41,23 @@ namespace amr::simplex {
 
 namespace detail {
 
-/// MATLAB's linspace(a, b, n) for n >= 2, bit for bit.
+/// MATLAB's linspace(a, b, n) for n >= 2, bit for bit, including its
+/// branches for spans whose intermediate products overflow.
 inline std::vector<double> linspace(double a, double b, Index n) {
     std::vector<double> y(static_cast<std::size_t>(n));
     const double n1 = static_cast<double>(n - 1);
-    for (Index i = 0; i < n; ++i)
-        y[static_cast<std::size_t>(i)] = a + (static_cast<double>(i) * (b - a)) / n1;
+    const bool overflows = std::isinf((b - a) * (n1 - 1.0));
+    for (Index i = 0; i < n; ++i) {
+        const double t = static_cast<double>(i);
+        double v;
+        if (!overflows)
+            v = a + (t * (b - a)) / n1;
+        else if (std::isinf(b - a))  // opposite signs overflow
+            v = a + (b / n1) * t - (a / n1) * t;
+        else
+            v = a + t * ((b - a) / n1);
+        y[static_cast<std::size_t>(i)] = v;
+    }
     y.front() = a;
     y.back() = b;
     if (a == b)
@@ -71,9 +85,19 @@ inline constexpr std::array<std::array<int, 4>, 6> kCellTets{{
     if ((d != 2 && d != 3) || nodes.size() != d || origin.size() != d)
         throw std::invalid_argument(
             "structured: dims, nodes and origin must all have 2 or 3 entries");
-    for (std::size_t k = 0; k < d; ++k)
+    std::int64_t points = 1, cells = 1;
+    for (std::size_t k = 0; k < d; ++k) {
         if (nodes[k] < 2)
             throw std::invalid_argument("structured: every axis needs at least 2 nodes");
+        if (!(std::isfinite(dims[k]) && dims[k] > 0.0 && std::isfinite(origin[k])))
+            throw std::invalid_argument(
+                "structured: dims must be finite and positive, origin finite");
+        points *= nodes[k];  // each factor fits in 31 bits, so checking every step cannot overflow
+        cells *= nodes[k] - 1;
+        if (points > std::numeric_limits<Index>::max() ||
+            cells * (d == 2 ? 2 : 6) > std::numeric_limits<Index>::max())
+            throw std::overflow_error("structured: mesh exceeds the index type");
+    }
 
     std::array<std::vector<double>, 3> axis;
     for (std::size_t k = 0; k < d; ++k)
