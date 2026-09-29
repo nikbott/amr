@@ -152,6 +152,10 @@ if(NOT MSVC)
   endif()
 endif()
 
+# Command-line front end over SMX1 files, for the MATLAB differential tests.
+add_executable(amr_simplex simplex/cli.cpp)
+target_link_libraries(amr_simplex PRIVATE simplex)
+
 if(BUILD_TESTING)
   add_executable(amr_simplex_tests simplex/tests.cpp)
   target_link_libraries(amr_simplex_tests PRIVATE simplex
