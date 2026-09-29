@@ -157,7 +157,9 @@ add_executable(amr_simplex simplex/cli.cpp)
 target_link_libraries(amr_simplex PRIVATE simplex)
 
 if(BUILD_TESTING)
-  add_executable(amr_simplex_tests simplex/tests.cpp simplex/test_io.cpp)
+  add_executable(
+    amr_simplex_tests simplex/tests.cpp simplex/test_io.cpp
+                      simplex/test_marking.cpp simplex/test_adapt.cpp)
   target_link_libraries(amr_simplex_tests PRIVATE simplex
                                                   Catch2::Catch2WithMain)
   add_test(NAME SimplexTests COMMAND amr_simplex_tests)
