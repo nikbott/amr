@@ -147,6 +147,47 @@ int count_balance_violations(const LinearTree<DIM>& tree) {
     return violations + missing_neighbors;
 }
 
+// Leaf set as (code, level) pairs in Morton order.
+template <int DIM>
+std::vector<std::pair<uint64_t, int>> leaves_of(const LinearTree<DIM>& tree) {
+    std::vector<std::pair<uint64_t, int>> out;
+    for (const auto& n : tree)
+        out.emplace_back(n.code.value, n.level);
+    return out;
+}
+
+// True when every leaf of `after` lies inside a leaf of `before` at the same or
+// a coarser level: balance may only refine, never coarsen or move leaves.
+template <int DIM>
+bool only_refines(const std::vector<std::pair<uint64_t, int>>& before,
+                  const std::vector<std::pair<uint64_t, int>>& after,
+                  int max_level) {
+    for (const auto& [code, level] : after) {
+        auto it = std::upper_bound(before.begin(), before.end(), std::make_pair(code, INT32_MAX));
+        if (it == before.begin())
+            return false;
+        --it;
+        const uint64_t span = 1ULL << (DIM * (max_level - it->second));
+        if (code < it->first || code >= it->first + span || it->second > level)
+            return false;
+    }
+    return true;
+}
+
+// Balance must fix real violations, only refine, and be idempotent.
+template <int DIM>
+void check_balance_properties(LinearTree<DIM>& tree) {
+    REQUIRE(count_balance_violations(tree) > 0);  // fixture is not vacuous
+    const auto before = leaves_of(tree);
+    tree.balance();
+    tree.verify();
+    REQUIRE(count_balance_violations(tree) == 0);
+    const auto after = leaves_of(tree);
+    REQUIRE(only_refines<DIM>(before, after, tree.max_level));
+    tree.balance();
+    REQUIRE(leaves_of(tree) == after);  // idempotent
+}
+
 // ==================================================================================
 // TEST SUITE
 // ==================================================================================
@@ -358,32 +399,23 @@ TEMPLATE_TEST_CASE("2:1 Balance & Ripple Algorithm (Holke §3.3)", "[balance]", 
         while (tree.refine(center_oracle))
             ;
 
-        // Execute Balance
-        tree.balance();
-        tree.verify();
-
-        // Verification
-        int violations = count_balance_violations(tree);
-        REQUIRE(violations == 0);
+        check_balance_properties(tree);
     }
 
     SECTION("Random Cloud Stress Test") {
+        // Sparse pseudo-random refinement (a multiplicative hash of the code) so
+        // neighbouring leaves end up several levels apart before balancing.
         TestType tree(8);
         auto cloud_oracle = [&](const Node& n, int) {
-            if (n.level >= 5)
+            if (n.level >= 6)
                 return false;
-            // Arbitrary math to create irregular shapes
-            return (n.code.value % 7 == 0 || n.code.value % 13 == 0);
+            return ((n.code.value * 0x9e3779b97f4a7c15ULL) >> 40) % 4 == 0;
         };
 
         for (int i = 0; i < 8; ++i)
             tree.refine(cloud_oracle);
 
-        tree.balance();
-        tree.verify();
-
-        int violations = count_balance_violations(tree);
-        REQUIRE(violations == 0);
+        check_balance_properties(tree);
     }
 }
 
