@@ -29,8 +29,9 @@ Each C++ backend has the same module layout: `core` (Morton + strong types),
 unstructured triangle/tetrahedron meshes the FE-DIC solver correlates on
 ([Bey1995], [Zhang1995]), with hanging nodes, 1-irregular balance and the
 prolongation. Tests: Catch2 (`simplex/tests.cpp`), built by CMake as
-`amr_simplex_tests`. `amr_simplex {balance|refine} IN OUT` runs it on SMX1
-files (`simplex/io.hpp`), the exchange format MATLAB drives it through.
+`amr_simplex_tests`. `amr_simplex {balance|refine} IN OUT` runs it on SMX2
+files (`simplex/io.hpp`: a typed mesh plus named arrays), the exchange format
+MATLAB drives it through.
 
 ## Invariants
 

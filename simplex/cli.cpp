@@ -1,42 +1,79 @@
 /**
  * @file cli.cpp
- * @brief Command-line front end to simplex.hpp over SMX1 files (io.hpp).
+ * @brief Command-line front end to the simplex engine over SMX2 files (io.hpp).
  *
- * @details Lets MATLAB drive the engine until the MEX interface exists:
+ * @details Lets MATLAB drive the engine through files:
  *
- *   amr_simplex balance IN OUT   OUT holds IN's mesh; its indices are the
- *                                balance closure of IN's element list
- *   amr_simplex refine IN OUT    OUT holds the refined mesh; its indices are
- *                                each new node's two parents, in node order
+ *   amr_simplex refine IN OUT      IN: mesh + int "elements". OUT: refined mesh
+ *                                  + prolongation
+ *   amr_simplex balance IN OUT     IN: mesh + int "elements". OUT: IN's mesh +
+ *                                  int "balanced"
+ *
+ * The prolongation U_new = S U_old keeps every old node and gives new node
+ * n_old + k the weighted sum of its parents: int "prolongation_count" (parents
+ * per new node), int "prolongation_parents", double "prolongation_weights".
  */
 
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
 #include "io.hpp"
 #include "simplex.hpp"
 
+namespace {
+
+using namespace amr::simplex;
+
+template <class T>
+const std::vector<T>& field(const std::map<std::string, std::vector<T>>& fields, const char* name) {
+    const auto it = fields.find(name);
+    if (it == fields.end())
+        throw std::runtime_error(std::string("missing input field \"") + name + "\"");
+    return it->second;
+}
+
+void add_prolongation(const Refinement& r,
+                      std::map<std::string, std::vector<Index>>& ints,
+                      std::map<std::string, std::vector<double>>& doubles) {
+    auto& count = ints["prolongation_count"];
+    auto& parents = ints["prolongation_parents"];
+    auto& weights = doubles["prolongation_weights"];
+    for (const auto& p : r.parents) {
+        count.push_back(2);
+        parents.insert(parents.end(), p.begin(), p.end());
+        weights.insert(weights.end(), {0.5, 0.5});
+    }
+}
+
+void run(const std::string& command, const std::string& in_path, const std::string& out_path) {
+    const auto in = io::read(in_path);
+    std::map<std::string, std::vector<Index>> ints;
+    std::map<std::string, std::vector<double>> doubles;
+    if (command == "refine") {
+        const auto r = refine(in.mesh, field(in.ints, "elements"));
+        add_prolongation(r, ints, doubles);
+        io::write(out_path, r.mesh, ints, doubles);
+    } else if (command == "balance") {
+        ints["balanced"] = balance_closure(in.mesh, field(in.ints, "elements"));
+        io::write(out_path, in.mesh, ints, doubles);
+    } else {
+        throw std::runtime_error("unknown command \"" + command + "\"");
+    }
+}
+
+}  // namespace
+
 int main(int argc, char** argv) {
-    using namespace amr::simplex;
     const std::vector<std::string> args(argv + 1, argv + argc);
-    if (args.size() != 3 || (args[0] != "balance" && args[0] != "refine")) {
-        std::cerr << "usage: amr_simplex {balance|refine} IN.smx OUT.smx\n";
+    if (args.size() != 3) {
+        std::cerr << "usage: amr_simplex {refine|balance} IN.smx OUT.smx\n";
         return 2;
     }
     try {
-        const auto in = io::read(args[1]);
-        if (args[0] == "balance") {
-            io::write(args[2], in.mesh, balance_closure(in.mesh, in.indices));
-        } else {
-            const auto r = refine(in.mesh, in.indices);
-            std::vector<Index> parents;
-            parents.reserve(2 * r.parents.size());
-            for (const auto& p : r.parents)
-                parents.insert(parents.end(), p.begin(), p.end());
-            io::write(args[2], r.mesh, parents);
-        }
+        run(args[0], args[1], args[2]);
     } catch (const std::exception& e) {
         std::cerr << "amr_simplex: " << e.what() << '\n';
         return EXIT_FAILURE;
