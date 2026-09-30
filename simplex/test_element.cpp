@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <map>
 #include <numeric>
 #include <random>
@@ -417,26 +418,7 @@ TEST_CASE("Children induce each face's own refinement", "[element]") {
                         m{{facet[0], 0.5}, {facet[1], 0.5}};
                     expected = {{a, m}, {m, b}};
                 } else {
-                    // Order the facet's vertices as its reference element orders them:
-                    // triangles any way, quads cyclically.
-                    std::vector<int> cyc = facet;
-                    if (facet.size() == 4) {
-                        const auto on_edge = [&](int x, int y) {
-                            return std::any_of(t.edges.begin(), t.edges.end(), [&](const auto& e) {
-                                return (e[0] == x && e[1] == y) || (e[0] == y && e[1] == x);
-                            });
-                        };
-                        cyc = {facet[0]};
-                        std::vector<int> rest(facet.begin() + 1, facet.end());
-                        while (!rest.empty()) {
-                            auto it = std::find_if(rest.begin(), rest.end(), [&](int x) {
-                                return on_edge(cyc.back(), x);
-                            });
-                            REQUIRE(it != rest.end());
-                            cyc.push_back(*it);
-                            rest.erase(it);
-                        }
-                    }
+                    const auto& cyc = facet;  // cyclic, as the face's own element orders it
                     const auto& ft = element_type(fs);
                     for (const auto& fc : all_children(ft.red, 0)) {
                         std::set<std::map<int, double>> nodes;
@@ -559,9 +541,73 @@ TEST_CASE("Edges and faces are those of the convex reference element", "[element
     }
 }
 
-TEST_CASE("Unknown shape codes are rejected", "[element]") {
-    CHECK(known_shape(0));
-    CHECK(known_shape(14));
-    CHECK_FALSE(known_shape(2));
+TEST_CASE("Measures are the divergence theorem over the outward faces", "[element]") {
+    // |V| = 1/3 of the flux of x through the boundary, with triangular faces
+    // flat and quadrilateral ones bilinear. Independent of signed_measure's
+    // formulas, exact on warped elements, and wrong for any face that is not
+    // listed cyclically and outward.
+    std::mt19937 rng(19);
+    std::uniform_real_distribution<double> warp(-0.15, 0.15);
+    const std::array<double, 2> g{0.5 - 0.5 / std::sqrt(3.0), 0.5 + 0.5 / std::sqrt(3.0)};
+    using detail::cross, detail::dot, detail::sub;
+    for (Shape s : kShapes) {
+        const auto& t = element_type(s);
+        if (t.dim != 3)
+            continue;
+        INFO("shape " << static_cast<int>(s));
+        for (int trial = 0; trial < 50; ++trial) {
+            const auto f = random_affine(3, rng);
+            std::vector<Point> x;
+            for (auto p : reference(s)) {
+                for (auto& c : p)
+                    c += warp(rng);
+                x.push_back(f(p));
+            }
+            double flux = 0;
+            for (const auto& face : t.faces) {
+                const auto& a = x[static_cast<std::size_t>(face[0])];
+                const auto& b = x[static_cast<std::size_t>(face[1])];
+                const auto& c = x[static_cast<std::size_t>(face[2])];
+                if (face.size() == 3) {
+                    const Point centroid{(a[0] + b[0] + c[0]) / 3,
+                                         (a[1] + b[1] + c[1]) / 3,
+                                         (a[2] + b[2] + c[2]) / 3};
+                    flux += dot(centroid, cross(sub(b, a), sub(c, a))) / 2;
+                    continue;
+                }
+                // x . (x_u x x_v) is biquadratic on a bilinear face: 2x2 Gauss is exact.
+                const auto& d = x[static_cast<std::size_t>(face[3])];
+                for (double u : g)
+                    for (double v : g) {
+                        Point p, xu, xv;
+                        for (std::size_t k = 0; k < 3; ++k) {
+                            p[k] = a[k] * (1 - u) * (1 - v) + b[k] * u * (1 - v) + c[k] * u * v +
+                                   d[k] * (1 - u) * v;
+                            xu[k] = (b[k] - a[k]) * (1 - v) + (c[k] - d[k]) * v;
+                            xv[k] = (d[k] - a[k]) * (1 - u) + (c[k] - b[k]) * u;
+                        }
+                        flux += dot(p, cross(xu, xv)) / 4;
+                    }
+            }
+            CHECK_THAT(signed_measure(s, x), WithinRel(flux / 3, 1e-12));
+        }
+    }
+}
+
+TEST_CASE("Unknown shapes and malformed input are rejected", "[element]") {
+    for (int code = 0; code < 256; ++code)
+        CHECK(
+            known_shape(static_cast<std::uint8_t>(code)) ==
+            (std::find(kShapes.begin(), kShapes.end(), static_cast<Shape>(code)) != kShapes.end()));
     CHECK_THROWS_AS(element_type(static_cast<Shape>(2)), std::invalid_argument);
+    CHECK_THROWS_AS(detail::freudenthal(3, std::vector<int>{0, 1, 2}), std::invalid_argument);
+    CHECK_THROWS_AS(detail::freudenthal(2, std::vector<int>{0, 0, 1}), std::invalid_argument);
+    CHECK_THROWS_AS(detail::freudenthal(3, std::vector<int>{0, 1, 2, 5}), std::invalid_argument);
+    CHECK_THROWS_AS(detail::freudenthal(0, std::vector<int>{0}), std::invalid_argument);
+    const auto h8 = reference(Shape::H8);
+    CHECK_THROWS_AS(signed_measure(Shape::T4, h8), std::invalid_argument);
+    CHECK_THROWS_AS(simplex_quality(Shape::H8, h8), std::invalid_argument);
+    const auto& t4 = element_type(Shape::T4);
+    CHECK_THROWS_AS(split_choice(t4.red, reference(Shape::T4)), std::invalid_argument);
+    CHECK(RedTemplate{}.children() == 0);
 }

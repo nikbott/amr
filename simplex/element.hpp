@@ -66,11 +66,12 @@ struct Child {
 };
 
 /// Red refinement of a reference element. The children are head, then one of
-/// the choices, then tail; most shapes have a single (empty) choice.
+/// the choices, then tail. `choices` is never empty: a shape with one split
+/// has a single empty choice.
 struct RedTemplate {
     std::vector<LatticeNode> new_nodes;
     std::vector<Child> head, tail;
-    std::vector<std::vector<Child>> choices;
+    std::vector<std::vector<Child>> choices{{}};
     [[nodiscard]] std::size_t children() const {
         return head.size() + choices.front().size() + tail.size();
     }
@@ -81,7 +82,9 @@ struct ElementType {
     int dim = 2;       ///< topological dimension
     int vertices = 3;  ///< in the element's node order
     std::vector<std::array<int, 2>> edges;
-    std::vector<std::vector<int>> faces;  ///< 3D: codimension-1 faces as ascending vertex lists
+    /// 3D: the codimension-1 faces, each in cyclic order, counter-clockwise
+    /// seen from outside.
+    std::vector<std::vector<int>> faces;
     RedTemplate red;
 };
 
@@ -139,6 +142,12 @@ inline int det_sign(std::vector<std::vector<long long>> a) {
 }
 
 inline SimplexSplit freudenthal(int d, std::span<const int> order, bool oriented = true) {
+    std::vector<int> sorted(order.begin(), order.end());
+    std::sort(sorted.begin(), sorted.end());
+    if (d < 1 || sorted.size() != static_cast<std::size_t>(d + 1) ||
+        std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end() || sorted.front() != 0 ||
+        sorted.back() != d)
+        throw std::invalid_argument("freudenthal: order must be a permutation of 0..d, d >= 1");
     SimplexSplit s;
     s.point = lattice_points(d);
     std::map<std::vector<int>, int> index;
@@ -309,7 +318,6 @@ inline RedTemplate product_red(Shape shape,
             child.node.push_back(lex_nodes[static_cast<std::size_t>(k)]);
         red.head.push_back(std::move(child));
     }
-    red.choices = {{}};
     return red;
 }
 
@@ -323,7 +331,6 @@ inline ElementType make_t3() {
     t.red.new_nodes = {midpoint_node(1, 2), midpoint_node(0, 2), midpoint_node(0, 1)};
     for (const auto& c : std::vector<std::vector<int>>{{2, 4, 3}, {3, 5, 1}, {4, 0, 5}, {5, 3, 4}})
         t.red.head.push_back({Shape::T3, c});
-    t.red.choices = {{}};
     return t;
 }
 
@@ -332,7 +339,7 @@ inline ElementType make_t4() {
                   3,
                   4,
                   {{{0, 1}}, {{0, 2}}, {{0, 3}}, {{1, 2}}, {{1, 3}}, {{2, 3}}},
-                  {{0, 1, 2}, {0, 1, 3}, {0, 2, 3}, {1, 2, 3}},
+                  {{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}},
                   {}};
     // New nodes 4 = m13, 5 = m03, 6 = m01, 7 = m23, 8 = m12, 9 = m02.
     t.red.new_nodes = {midpoint_node(1, 3),
@@ -347,6 +354,7 @@ inline ElementType make_t4() {
         {{4, 6, 5, 9}, {4, 8, 6, 9}, {4, 7, 8, 9}, {4, 5, 7, 9}},
         {{6, 7, 5, 4}, {6, 7, 9, 5}, {6, 7, 8, 9}, {6, 7, 4, 8}},
         {{5, 8, 4, 6}, {5, 8, 6, 9}, {5, 8, 9, 7}, {5, 8, 7, 4}}};
+    t.red.choices.clear();
     for (const auto& split : octahedron) {
         std::vector<Child> choice;
         for (const auto& c : split)
@@ -382,7 +390,7 @@ inline ElementType make_h8() {
          {{1, 5}},
          {{2, 6}},
          {{3, 7}}},
-        {{0, 1, 2, 3}, {4, 5, 6, 7}, {0, 1, 4, 5}, {1, 2, 5, 6}, {2, 3, 6, 7}, {0, 3, 4, 7}},
+        {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {1, 2, 6, 5}, {2, 3, 7, 6}, {3, 0, 4, 7}},
         {}};
     t.red = product_red(Shape::H8, {1, 1, 1}, {0, 4, 6, 2, 1, 5, 7, 3});
     return t;
@@ -396,7 +404,7 @@ inline ElementType make_w6() {
         3,
         6,
         {{{0, 1}}, {{1, 2}}, {{0, 2}}, {{3, 4}}, {{4, 5}}, {{3, 5}}, {{0, 3}}, {{1, 4}}, {{2, 5}}},
-        {{0, 1, 2}, {3, 4, 5}, {0, 1, 3, 4}, {1, 2, 4, 5}, {0, 2, 3, 5}},
+        {{0, 2, 1}, {3, 4, 5}, {0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5}},
         {}};
     t.red = product_red(Shape::W6, {2, 1}, {0, 2, 4, 1, 3, 5});
     return t;
@@ -408,7 +416,7 @@ inline ElementType make_p5() {
                   3,
                   5,
                   {{{0, 1}}, {{1, 2}}, {{2, 3}}, {{0, 3}}, {{0, 4}}, {{1, 4}}, {{2, 4}}, {{3, 4}}},
-                  {{0, 1, 2, 3}, {0, 1, 4}, {1, 2, 4}, {2, 3, 4}, {0, 3, 4}},
+                  {{0, 3, 2, 1}, {0, 1, 4}, {1, 2, 4}, {2, 3, 4}, {3, 0, 4}},
                   {}};
     // 5 = m01, 6 = m12, 7 = m23, 8 = m03, 9 = base centre, 10..13 = m04..m34.
     t.red.new_nodes = {midpoint_node(0, 1),
@@ -430,33 +438,28 @@ inline ElementType make_p5() {
                   {Shape::T4, {12, 6, 11, 9}},  // one per lateral face
                   {Shape::T4, {13, 7, 12, 9}},
                   {Shape::T4, {10, 8, 13, 9}}};
-    t.red.choices = {{}};
     return t;
+}
+
+/// Every supported shape's reference element, built once.
+inline const std::map<Shape, ElementType>& element_types() {
+    static const std::map<Shape, ElementType> types{{Shape::T3, make_t3()},
+                                                    {Shape::Q4, make_q4()},
+                                                    {Shape::T4, make_t4()},
+                                                    {Shape::H8, make_h8()},
+                                                    {Shape::W6, make_w6()},
+                                                    {Shape::P5, make_p5()}};
+    return types;
 }
 
 }  // namespace detail
 
 inline bool known_shape(std::uint8_t code) {
-    switch (static_cast<Shape>(code)) {
-        case Shape::T3:
-        case Shape::Q4:
-        case Shape::T4:
-        case Shape::H8:
-        case Shape::W6:
-        case Shape::P5:
-            return true;
-    }
-    return false;
+    return detail::element_types().contains(static_cast<Shape>(code));
 }
 
-/// The reference element of a shape, built once.
 inline const ElementType& element_type(Shape s) {
-    static const std::map<Shape, ElementType> types{{Shape::T3, detail::make_t3()},
-                                                    {Shape::Q4, detail::make_q4()},
-                                                    {Shape::T4, detail::make_t4()},
-                                                    {Shape::H8, detail::make_h8()},
-                                                    {Shape::W6, detail::make_w6()},
-                                                    {Shape::P5, detail::make_p5()}};
+    const auto& types = detail::element_types();
     const auto it = types.find(s);
     if (it == types.end())
         throw std::invalid_argument("element: unknown shape code " +
@@ -482,19 +485,30 @@ inline double tet_signed(const Point& a, const Point& b, const Point& c, const P
 }  // namespace detail
 
 /// Signed area (2D, in the xy plane) or volume (3D) of an element whose
-/// vertices, in its node order, are x.
+/// vertices, in its node order, are x. Exact for the element's own map, so
+/// warped quadrilateral faces count as the bilinear surfaces they are.
 inline double signed_measure(Shape s, std::span<const Point> x) {
     using namespace detail;
+    const auto need = [&x](std::size_t n) {
+        if (x.size() != n)
+            throw std::invalid_argument("signed_measure: wrong number of vertices");
+    };
     switch (s) {
         case Shape::T3:
+            need(3);
             return 0.5 * cross(sub(x[1], x[0]), sub(x[2], x[0]))[2];
         case Shape::Q4:
+            need(4);
             return 0.5 * cross(sub(x[2], x[0]), sub(x[3], x[1]))[2];
         case Shape::T4:
+            need(4);
             return tet_signed(x[0], x[1], x[2], x[3]);
-        case Shape::P5:
-            return tet_signed(x[0], x[1], x[2], x[4]) + tet_signed(x[0], x[2], x[3], x[4]);
+        case Shape::P5:  // cone over the bilinear base: the mean of its two diagonal splits
+            need(5);
+            return 0.5 * (tet_signed(x[0], x[1], x[2], x[4]) + tet_signed(x[0], x[2], x[3], x[4]) +
+                          tet_signed(x[0], x[1], x[3], x[4]) + tet_signed(x[1], x[2], x[3], x[4]));
         case Shape::H8: {  // 2x2x2 Gauss on the trilinear map: exact
+            need(8);
             const double g[2]{0.5 - 0.5 / std::sqrt(3.0), 0.5 + 0.5 / std::sqrt(3.0)};
             constexpr int ref[8][3]{{0, 0, 0},
                                     {1, 0, 0},
@@ -526,6 +540,7 @@ inline double signed_measure(Shape s, std::span<const Point> x) {
             return v;
         }
         case Shape::W6: {  // centroid x 2-point Gauss in the height: exact
+            need(6);
             const double g[2]{0.5 - 0.5 / std::sqrt(3.0), 0.5 + 0.5 / std::sqrt(3.0)};
             double v = 0.0;
             for (double z : g) {
@@ -546,9 +561,12 @@ inline double signed_measure(Shape s, std::span<const Point> x) {
     throw std::invalid_argument("element: unknown shape");
 }
 
-/// Mean-ratio quality of a simplex: 1 when regular, 0 when flat.
+/// Mean-ratio quality of a simplex (a T3 in the xy plane, or a T4): 1 when
+/// regular, 0 when flat.
 inline double simplex_quality(Shape s, std::span<const Point> x) {
     using namespace detail;
+    if (s != Shape::T3 && s != Shape::T4)
+        throw std::invalid_argument("simplex_quality: only T3 and T4 are simplices");
     double sum_l2 = 0.0;
     for (std::size_t a = 0; a < x.size(); ++a)
         for (std::size_t b = a + 1; b < x.size(); ++b)
@@ -562,18 +580,25 @@ inline double simplex_quality(Shape s, std::span<const Point> x) {
 
 /// The choice of `red` whose worst child is best (earliest on ties), given
 /// the positions of the parent's vertices and new nodes, in local order.
+/// Choices consist of simplices.
 inline std::size_t split_choice(const RedTemplate& red, std::span<const Point> local) {
     if (red.choices.size() < 2)
         return 0;
     std::size_t best = 0;
     double best_worst = -1.0;
+    std::array<Point, 4> x;
     for (std::size_t k = 0; k < red.choices.size(); ++k) {
         double worst = std::numeric_limits<double>::infinity();
         for (const auto& c : red.choices[k]) {
-            std::vector<Point> x;
-            for (int n : c.node)
-                x.push_back(local[static_cast<std::size_t>(n)]);
-            worst = std::min(worst, simplex_quality(c.shape, x));
+            if (c.node.size() > x.size())
+                throw std::invalid_argument("split_choice: choices must consist of simplices");
+            for (std::size_t i = 0; i < c.node.size(); ++i) {
+                const auto n = static_cast<std::size_t>(c.node[i]);
+                if (n >= local.size())
+                    throw std::invalid_argument("split_choice: too few local positions");
+                x[i] = local[n];
+            }
+            worst = std::min(worst, simplex_quality(c.shape, std::span(x.data(), c.node.size())));
         }
         if (worst > best_worst) {
             best_worst = worst;
