@@ -123,20 +123,27 @@ inline constexpr std::array<std::array<int, 4>, 6> kCellTets{{
             for (Index j = 0; j + 1 < n[1]; ++j) {
                 const Index a = id(i, j, 0), b = id(i + 1, j, 0);          // bottom edge
                 const Index c = id(i + 1, j + 1, 0), e = id(i, j + 1, 0);  // top edge
-                if ((i < half_x) == (j < half_y))
-                    m.con.insert(m.con.end(), {a, b, c, c, e, a});  // diagonal a-c
-                else
-                    m.con.insert(m.con.end(), {a, b, e, b, c, e});  // diagonal b-e
+                if ((i < half_x) == (j < half_y)) {                        // diagonal a-c
+                    m.add(Shape::T3, {a, b, c});
+                    m.add(Shape::T3, {c, e, a});
+                } else {  // diagonal b-e
+                    m.add(Shape::T3, {a, b, e});
+                    m.add(Shape::T3, {b, c, e});
+                }
             }
         return m;
     }
     for (Index k = 0; k + 1 < n[2]; ++k)
         for (Index i = 0; i + 1 < n[0]; ++i)
             for (Index j = 0; j + 1 < n[1]; ++j)
-                for (const auto& tet : detail::kCellTets)
-                    for (int bits : tet)
-                        m.con.push_back(
-                            id(i + (bits & 1), j + ((bits >> 1) & 1), k + ((bits >> 2) & 1)));
+                for (const auto& tet : detail::kCellTets) {
+                    std::array<Index, 4> v;
+                    for (std::size_t c = 0; c < v.size(); ++c) {
+                        const int bits = tet[c];
+                        v[c] = id(i + (bits & 1), j + ((bits >> 1) & 1), k + ((bits >> 2) & 1));
+                    }
+                    m.add(Shape::T4, v);
+                }
     return m;
 }
 

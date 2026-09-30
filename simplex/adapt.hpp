@@ -9,7 +9,9 @@
  * reported as stagnated: the caller correlates that mesh once more and stops.
  *
  * Element length is V^(1/d), the convention of the solver's size floor, its
- * local regularization and the MCOD estimator.
+ * local regularization and the MCOD estimator. It is the same for every
+ * shape: the floor bounds how many pixels or voxels an element integrates
+ * over, which is its measure, so on hybrid meshes it is a volume floor.
  */
 #pragma once
 
@@ -47,17 +49,20 @@ struct Adaptation {
     std::array<double, 3> seconds{};  ///< wall time of marking, balance and refinement
 };
 
-/// Area (T3) or volume (T4) of element e.
+/// Area or volume of element e. Tetrahedra keep the cofactor expansion the
+/// solver's size floor was recorded with, so the floor decides the same way
+/// bit for bit; every other shape uses signed_measure.
 [[nodiscard]] inline double measure(const Mesh& m, Index e) {
     const auto v = m.element(e);
-    const auto p = [&](std::size_t i) { return m.pos[static_cast<std::size_t>(v[i])]; };
-    const Point a = p(0), b = p(1), c = p(2);
-    const double ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-    const double vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    if (m.dim == 2)
-        return 0.5 * std::abs(ux * vy - uy * vx);
-    const Point d = p(3);
-    const double wx = d[0] - a[0], wy = d[1] - a[1], wz = d[2] - a[2];
+    std::array<Point, 8> x;
+    for (std::size_t i = 0; i < v.size(); ++i)
+        x[i] = m.pos[static_cast<std::size_t>(v[i])];
+    const Shape shape = m.type[static_cast<std::size_t>(e)];
+    if (shape != Shape::T4)
+        return std::abs(signed_measure(shape, std::span(x.data(), v.size())));
+    const double ux = x[1][0] - x[0][0], uy = x[1][1] - x[0][1], uz = x[1][2] - x[0][2];
+    const double vx = x[2][0] - x[0][0], vy = x[2][1] - x[0][1], vz = x[2][2] - x[0][2];
+    const double wx = x[3][0] - x[0][0], wy = x[3][1] - x[0][1], wz = x[3][2] - x[0][2];
     return std::abs(ux * (vy * wz - vz * wy) - uy * (vx * wz - vz * wx) +
                     uz * (vx * wy - vy * wx)) /
            6.0;
@@ -91,7 +96,9 @@ struct Adaptation {
     // Lengths are needed only for the floor.
     const auto length =
         p.marking.min_element_length > 0.0 ? element_lengths(mesh) : std::vector<double>{};
-    const std::vector<Index> growth(n, mesh.dim == 2 ? 3 : 7);  // red refinement: 4 or 8 children
+    std::vector<Index> growth(n);  // elements a refinement adds: children - 1
+    for (std::size_t e = 0; e < n; ++e)
+        growth[e] = static_cast<Index>(element_type(mesh.type[e]).red.children()) - 1;
 
     Adaptation a;
     a.marking = marking::mark(error, ratio, length, growth, p.marking);
