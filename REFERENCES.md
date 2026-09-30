@@ -77,6 +77,23 @@ octahedron cut along one of its 3 diagonals. `simplex/` uses the corner and
 octahedron split, but picks the diagonal by quality ([Zhang1995]) rather than
 by Bey's fixed rule.
 
+**[Freudenthal1942]** H. Freudenthal. *Simplizialzerlegungen von beschränkter
+Flachheit.* Annals of Mathematics, **43**(3), 580–583 (1942).
+DOI: [10.2307/1968813](https://doi.org/10.2307/1968813).
+
+The subdivision of a d-simplex into 2^d simplices on the lattice with
+barycentric coordinates in {0, 1/2, 1} (Kuhn paths through the unit cubes of the
+scaled simplex). `simplex/element.hpp` generates every red refinement from it,
+with products of simplices refined factor by factor.
+
+**[Bey2000]** J. Bey. *Simplicial grid refinement: on Freudenthal's algorithm and
+the optimal number of congruence classes.* Numerische Mathematik, **85**(1),
+1–29 (2000). DOI: [10.1007/s002110050475](https://doi.org/10.1007/s002110050475).
+
+Refining in each child's own vertex order, Freudenthal's algorithm yields at
+most d!/2 congruence classes. `simplex/test_element.cpp` checks this bound for
+tetrahedra.
+
 **[Zhang1995]** S. Zhang. *Successive subdivisions of tetrahedra and multigrid
 methods on tetrahedral meshes.* Houston J. Math., **21**, 541–556 (1995).
 
