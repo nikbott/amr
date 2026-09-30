@@ -4,6 +4,8 @@ Validation of the `omp/`, `mpi/`, and `cuda/` backends against the
 state-of-the-art parallel-AMR literature (p4est, Dendro-5.01, t8code), from a
 verified deep-research pass (2026-06-03). Citation keys in
 [`REFERENCES.md`](../REFERENCES.md). Companion: [`gpu-balance-notes.md`](gpu-balance-notes.md).
+Status updated 2026-09-29 against the code; code is referenced by function,
+not line, so the references survive edits.
 
 ## Verdict
 
@@ -29,20 +31,20 @@ cited AMR sources.
 |---|---|---|---|
 | Data structure | SoA linear octree, `Uninit<T>` to skip zero-init | matches p4est/t8code | none |
 | Refinement scan | hand-rolled two-pass exclusive_scan (thread partials + serial fixup), `omp/core.hpp` | work-efficient; serial fixup is O(#threads), negligible | keep; optionally benchmark vs `std::exclusive_scan(std::execution::par_unseq)` |
-| **2:1 balance** | ripple, **re-scans all N leaves every pass** via `std::lower_bound` (`tree.hpp:358`) | same O(total)-per-pass cost the CUDA backend already removed | **Port the CUDA active-front balance** (re-check only the front; byte-identical, ~1.8× on thin features). Highest-value omp/ upgrade. |
-| Balance flag write | `#pragma omp atomic write flag=1` (`tree.hpp:418`) | monotonic, all writes identical → benign | none (the earlier "atomic-OR" concern is moot since every write is `1`) |
+| **2:1 balance** | **active front** (`balance()`): only cells next to a newly refined one are re-checked, with a full-check fallback on wide fronts; the full ripple stays as the oracle `balance_ref()` | the CUDA backend's front, ported | **done** (8769385); byte-identical to `balance_ref()` in the tests |
+| Balance flag write | `#pragma omp atomic write flag=1` in `balance()` | monotonic, all writes identical → benign | none (the earlier "atomic-OR" concern is moot since every write is `1`) |
 | Work scheduling | `schedule(dynamic,1024)` on the balance scan | reasonable for graded load imbalance | keep; watch false sharing on `wksp_flags` (byte array, dense writes) |
 
 ## mpi/ (distributed) — `mpi/tree.hpp`
 
 | Aspect | Our code | SOTA | Action |
 |---|---|---|---|
-| Partition | equal-element SFC via `MPI_Exscan` partition map (`repartition()`, `tree.hpp:272`) | p4est default is **equal-element**, computed without communication | **validated** — matches SOTA default |
-| Partition (imbalance) | equal-count only | weighted partition via per-octant cost callback; **Hilbert** SFC (Dendro default) lowers ghost surface vs Morton | For crack work, add an optional **weight/cost model** (helps only if deep octants cost more per element). Consider Hilbert ordering to cut halo volume. |
-| **2:1 balance** | multi-round ripple: re-`fetch_ghosts()` + `update_partition_map()` **every pass** (`tree.hpp:209-211`), `MPI_Allreduce` for convergence | p4est is **non-iterative**: local balance → **one** insulation-layer exchange → postbalance ([IBG2012]; insulation layer = 3^d envelope) | **Recommended upgrade** to single-round insulation-layer balance. Not a correctness fix (ripple is correct), but removes per-pass communication. |
-| **Ghost construction** | per-leaf neighbor enumeration, loops **over all ranks per needed node** (`fetch_ghosts()`, `tree.hpp:403`) → O(needed·P) | recursive top-down `Search`, runtime ∝ *partition-boundary* leaves, **no 2:1 precondition** ([IBWG2015]; Holke/Knapp/Burstedde 2021) | Replace the O(needed·P) rank scan with a boundary-driven construction; bound work by boundary size, not P. |
-| **Ghost exchange** | dense two-phase `MPI_Alltoall` + `MPI_Alltoallv` (`exchange_data()`, `tree.hpp:437`) | p4est uses a dedicated ghost object + **sparse symmetric non-blocking point-to-point** (R_pq≠∅ ⟺ R_qp≠∅), *not* global Alltoallv | Move to **sparse pairwise** exchange or `MPI_Neighbor_alltoallv` on a distributed-graph comm. Biggest scalability win at high rank counts. |
-| Empty partitions | all ranks reach collectives (coarsen-deadlock fixed, `tree.hpp:151-156`) | required invariant | **validated** — correct |
+| Partition | equal-element SFC via `MPI_Exscan` partition map (`repartition()`) | p4est default is **equal-element**, computed without communication | **validated** — matches SOTA default |
+| Partition (imbalance) | equal-count only | weighted partition via per-octant cost callback; **Hilbert** SFC (Dendro default) lowers ghost surface vs Morton | open: for crack work, an optional **weight/cost model** (helps only if deep octants cost more per element); Hilbert ordering to cut halo volume |
+| **2:1 balance** | multi-round ripple: `update_partition_map()` + `fetch_ghosts()` **every pass** (`balance()`), `MPI_Allreduce` for convergence | p4est is **non-iterative**: local balance → **one** insulation-layer exchange → postbalance ([IBG2012]; insulation layer = 3^d envelope) | open, recommended: single-round insulation-layer balance. Not a correctness fix (ripple is correct), but removes per-pass communication. |
+| **Ghost construction** | per-leaf neighbour enumeration over all local leaves; each needed node's owners found by binary search on the partition map, O(log P + k) (`fetch_ghosts()`, `find_owner_of_point()`) | recursive top-down `Search`, runtime ∝ *partition-boundary* leaves, **no 2:1 precondition** ([IBWG2015]; Holke/Knapp/Burstedde 2021) | **partly done**: the O(needed·P) rank scan is gone. Open: enumerate only partition-boundary leaves, so the work tracks the boundary rather than N_local. |
+| **Ghost exchange** | **sparse**: non-blocking point-to-point when every rank has few partners, else `MPI_Neighbor_alltoallv` on a distributed-graph communicator (`exchange_data()`) | p4est: dedicated ghost object + **sparse symmetric non-blocking point-to-point** | **done** (d841ebb); moves the same bytes as the former dense `MPI_Alltoallv` |
+| Empty partitions | all ranks reach collectives (the coarsen deadlock is fixed in `coarsen()`) | required invariant | **validated** — correct |
 
 ## Reference oracle (historical: `python/`, removed)
 
@@ -57,12 +59,12 @@ remain asserted in the C++ Catch2 suites.
 
 ## Prioritized action list
 
-1. **omp/ active-front balance** — port the verified CUDA optimization; byte-identical, biggest single-node win. *(Low risk, high value.)*
-2. **mpi/ ghost exchange → sparse/neighborhood collectives** — replace dense Alltoallv + O(needed·P) rank scan. *(Scalability-critical at many ranks.)*
-3. **mpi/ single-round insulation-layer balance** ([IBG2012]) — removes per-pass halo communication. *(Recommended, not correctness.)*
-4. **mpi/ ghost construction ∝ boundary** ([IBWG2015]) — boundary-driven, not per-rank. Pairs with #2.
-5. **Weighted/Hilbert partitioning** for crack imbalance — only if a per-octant cost model shows deep octants are costlier; Hilbert lowers halo surface.
-6. **Oracle invariant coverage** — confirm the five invariants are all asserted; cheap insurance for cross-backend parity.
+1. ~~**omp/ active-front balance**~~ — **done** (8769385).
+2. ~~**mpi/ ghost exchange → sparse/neighborhood collectives**~~ — **done** (d841ebb), including the O(log P + k) owner lookup.
+3. **mpi/ single-round insulation-layer balance** ([IBG2012]) — removes per-pass halo communication. *(Recommended, not correctness.)* Open.
+4. **mpi/ ghost construction ∝ boundary** ([IBWG2015]) — enumerate only partition-boundary leaves. Open; pairs with #3.
+5. **Weighted/Hilbert partitioning** for crack imbalance — only if a per-octant cost model shows deep octants are costlier; Hilbert lowers halo surface. Open.
+6. ~~**Oracle invariant coverage**~~ — **done**: sorted and unique leaves, volume = 1, 2:1, Morton round-trip and idempotent balance are asserted in `omp/tests.cpp`, and `verify()` checks levels, alignment and the domain (189ad7c).
 
 ## Caveats (from the verified pass)
 
