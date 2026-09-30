@@ -11,6 +11,8 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "core.hpp"
@@ -69,6 +71,9 @@ private:
 
 public:
     explicit DistributedTree(int max_lvl) : max_level(max_lvl) {
+        if (max_lvl < 0 || max_lvl > morton::max_level_limit(DIM))
+            throw std::invalid_argument("DistributedTree: max_level must be in [0, " +
+                                        std::to_string(morton::max_level_limit(DIM)) + "]");
         MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
         MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
         if (mpi_rank == 0) {
@@ -159,50 +164,7 @@ public:
     MortonCode get_neighbor_code(MortonCode code,
                                  int level,
                                  const std::array<int, DIM>& dir) const {
-        uint64_t c = code.value;
-        uint64_t mask_x = (DIM == 3) ? morton::MASK3_X : morton::MASK2_X;
-        uint64_t mask_y = (DIM == 3) ? morton::MASK3_Y : 0xAAAAAAAAAAAAAAAA;
-        uint64_t mask_z = (DIM == 3) ? morton::MASK3_Z : 0;
-        auto add_dim = [&](uint64_t current, uint64_t dim_mask, int d) -> uint64_t {
-            if (current == std::numeric_limits<uint64_t>::max())
-                return current;
-            if (d == 0)
-                return current;
-            // A level-0 cell spans the whole domain: any neighbour is out of
-            // bounds, and returning here avoids the 1<<64 shift at the max level.
-            if (level == 0)
-                return std::numeric_limits<uint64_t>::max();
-            uint64_t shift_coord = max_level - level;
-            uint64_t one_dilated =
-                (DIM == 3) ? (1ULL << (shift_coord * 3)) : (1ULL << (shift_coord * 2));
-            if (dim_mask == mask_y)
-                one_dilated <<= 1;
-            if (dim_mask == mask_z)
-                one_dilated <<= 2;
-            if (d > 0) {
-                // Out of the domain iff this axis already sits at its maximum
-                // aligned coordinate for this level. (The old all-ones test only
-                // fired at full resolution, so a coarser boundary cell's +neighbour
-                // wrapped instead of returning the sentinel.)
-                const uint64_t domain_mask =
-                    (DIM * max_level >= 64) ? ~0ULL : ((1ULL << (DIM * max_level)) - 1);
-                const uint64_t axis_max = (dim_mask & domain_mask) & ~(one_dilated - 1);
-                if ((current & dim_mask) == axis_max)
-                    return std::numeric_limits<uint64_t>::max();
-                uint64_t sum = (current | ~dim_mask) + one_dilated;
-                return (sum & dim_mask) | (current & ~dim_mask);
-            } else {
-                if ((current & dim_mask) < one_dilated)
-                    return std::numeric_limits<uint64_t>::max();
-                uint64_t diff = (current & dim_mask) - one_dilated;
-                return (diff & dim_mask) | (current & ~dim_mask);
-            }
-        };
-        uint64_t next = add_dim(c, mask_x, dir[0]);
-        next = add_dim(next, mask_y, dir[1]);
-        if constexpr (DIM == 3)
-            next = add_dim(next, mask_z, dir[2]);
-        return MortonCode{next};
+        return MortonCode{morton::neighbor_code<DIM>(code.value, level, max_level, dir.data())};
     }
 
     template <typename Oracle>

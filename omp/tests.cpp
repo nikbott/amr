@@ -319,6 +319,116 @@ TEST_CASE("get_neighbor_code returns the sentinel past the +domain boundary (cor
     }
 }
 
+namespace {
+/// morton::neighbor_code's oracle: decode, move one cell along each axis,
+/// check the domain, encode.
+template <int DIM>
+uint64_t neighbor_by_coordinates(uint64_t code, int level, int max_level, const int* dir) {
+    std::array<Coordinate, DIM> x;
+    if constexpr (DIM == 2)
+        x = morton::decode_2d(MortonCode{code});
+    else
+        x = morton::decode_3d(MortonCode{code});
+    const int64_t side = int64_t{1} << (max_level - level);
+    const int64_t extent = int64_t{1} << max_level;
+    std::array<Coordinate, DIM> y;
+    for (int k = 0; k < DIM; ++k) {
+        const int64_t v = int64_t{x[static_cast<std::size_t>(k)].value} + dir[k] * side;
+        if (v < 0 || v >= extent)
+            return UINT64_MAX;
+        y[static_cast<std::size_t>(k)] = Coordinate{static_cast<uint32_t>(v)};
+    }
+    if constexpr (DIM == 2)
+        return morton::encode_2d(y[0], y[1]).value;
+    else
+        return morton::encode_3d(y[0], y[1], y[2]).value;
+}
+
+template <int DIM>
+void check_neighbor(uint64_t code, int level, int max_level, const int* dir) {
+    const uint64_t got = morton::neighbor_code<DIM>(code, level, max_level, dir);
+    const uint64_t want = neighbor_by_coordinates<DIM>(code, level, max_level, dir);
+    if (got != want) {
+        INFO("code " << code << " level " << level << " max_level " << max_level << " dir "
+                     << dir[0] << "," << dir[1] << "," << (DIM == 3 ? dir[2] : 0));
+        CHECK(got == want);
+    }
+}
+}  // namespace
+
+TEMPLATE_TEST_CASE_SIG("neighbor_code matches decode, move, encode (core)",
+                       "[core][neighbor]",
+                       ((int DIM), DIM),
+                       2,
+                       3) {
+    std::vector<std::array<int, 3>> dirs;
+    for (int a = -1; a <= 1; ++a)
+        for (int b = -1; b <= 1; ++b)
+            for (int c = (DIM == 3 ? -1 : 0); c <= (DIM == 3 ? 1 : 0); ++c)
+                dirs.push_back({a, b, c});
+
+    SECTION("every aligned cell of every level of a small domain, every direction") {
+        const int max_level = DIM == 2 ? 5 : 3;
+        for (int level = 0; level <= max_level; ++level) {
+            const uint32_t side = 1u << (max_level - level);
+            const uint32_t extent = 1u << max_level;
+            for (uint32_t i = 0; i < extent; i += side)
+                for (uint32_t j = 0; j < extent; j += side)
+                    for (uint32_t k = 0; k < (DIM == 3 ? extent : 1u); k += side) {
+                        const uint64_t code =
+                            DIM == 2
+                                ? morton::encode_2d(Coordinate{i}, Coordinate{j}).value
+                                : morton::encode_3d(Coordinate{i}, Coordinate{j}, Coordinate{k})
+                                      .value;
+                        for (const auto& d : dirs)
+                            check_neighbor<DIM>(code, level, max_level, d.data());
+                    }
+        }
+    }
+    SECTION("random cells of the deepest trees: 62 bits in 2D, 63 in 3D") {
+        const int max_level = morton::max_level_limit(DIM);
+        std::mt19937_64 rng(DIM);
+        for (int n = 0; n < 20000; ++n) {
+            const int level = static_cast<int>(rng() % static_cast<uint64_t>(max_level + 1));
+            const uint64_t align = ~((uint64_t{1} << (max_level - level)) - 1);
+            const uint64_t limit = (uint64_t{1} << max_level) - 1;
+            std::array<Coordinate, 3> c{};
+            for (auto& v : c)
+                v = Coordinate{static_cast<uint32_t>(rng() & limit & align)};
+            const uint64_t code = DIM == 2 ? morton::encode_2d(c[0], c[1]).value
+                                           : morton::encode_3d(c[0], c[1], c[2]).value;
+            check_neighbor<DIM>(code, level, max_level, dirs[rng() % dirs.size()].data());
+        }
+    }
+}
+
+TEMPLATE_TEST_CASE_SIG("neighbor_code rejects what it cannot answer (core)",
+                       "[core][neighbor]",
+                       ((int DIM), DIM),
+                       2,
+                       3) {
+    // No cell's code is UINT64_MAX, so the sentinel cannot be confused with a
+    // neighbour: every code of the deepest tree stays below 2^63.
+    const int deepest = morton::max_level_limit(DIM);
+    const uint32_t far = (1u << deepest) - 1;
+    const uint64_t corner =
+        DIM == 2 ? morton::encode_2d(Coordinate{far}, Coordinate{far}).value
+                 : morton::encode_3d(Coordinate{far}, Coordinate{far}, Coordinate{far}).value;
+    CHECK(corner < (uint64_t{1} << 63));
+    const int west[3] = {-1, 0, 0};
+    CHECK(morton::neighbor_code<DIM>(corner, deepest, deepest, west) ==
+          neighbor_by_coordinates<DIM>(corner, deepest, deepest, west));
+    CHECK(morton::neighbor_code<DIM>(corner, deepest, deepest, west) != UINT64_MAX);
+    // Out-of-range levels and trees deeper than the limit get the sentinel.
+    const int east[3] = {1, 0, 0};
+    CHECK(morton::neighbor_code<DIM>(0, 4, 3, east) == UINT64_MAX);
+    CHECK(morton::neighbor_code<DIM>(0, -1, 3, east) == UINT64_MAX);
+    CHECK(morton::neighbor_code<DIM>(0, 1, deepest + 1, east) == UINT64_MAX);
+    CHECK_THROWS_AS(LinearTree<DIM>(deepest + 1), std::invalid_argument);
+    CHECK_THROWS_AS(LinearTree<DIM>(-1), std::invalid_argument);
+    CHECK_NOTHROW(LinearTree<DIM>(deepest));
+}
+
 TEMPLATE_TEST_CASE("Adaptivity & Coarsening (Burstedde §3.2)", "[amr][coarsen]", Quadtree, Octree) {
     constexpr int DIM = (std::is_same<TestType, Quadtree>::value) ? 2 : 3;
 

@@ -22,6 +22,7 @@
 #include <memory>
 #include <memory_resource>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <omp.h>
@@ -148,6 +149,9 @@ public:
     };
 
     explicit LinearTree(int max_lvl) : max_level(max_lvl) {
+        if (max_lvl < 0 || max_lvl > morton::max_level_limit(DIM))
+            throw std::invalid_argument("LinearTree: max_level must be in [0, " +
+                                        std::to_string(morton::max_level_limit(DIM)) + "]");
         leaf_codes.push_back(0);
         leaf_levels.push_back(0);
         buffer_codes.reserve(1024);
@@ -195,77 +199,7 @@ public:
     [[nodiscard]] MortonCode get_neighbor_code(MortonCode code,
                                                int level,
                                                const std::array<int, DIM>& dir) const {
-        // Integer-Intrinsic Neighbor Finding (Bitwise Arithmetic)
-        uint64_t c = code.value;
-        uint64_t mask_x, mask_y, mask_z;
-
-        if constexpr (DIM == 3) {
-            mask_x = morton::MASK3_X;
-            mask_y = morton::MASK3_Y;
-            mask_z = morton::MASK3_Z;
-        } else {
-            mask_x = morton::MASK2_X;
-            mask_y = 0xAAAAAAAAAAAAAAAA;
-            mask_z = 0;
-        }
-
-        auto add_dim = [&](uint64_t current, uint64_t dim_mask, int d) -> uint64_t {
-            if (current == UINT64_MAX)
-                return UINT64_MAX;  // Propagate error
-            if (d == 0)
-                return current;
-            // A level-0 cell spans the whole domain, so any neighbour is out of
-            // bounds. Returning here also avoids the 1<<64 shift below at the
-            // maximum level (shift_coord*DIM would reach the word width).
-            if (level == 0)
-                return UINT64_MAX;
-
-            uint64_t shift_coord = max_level - level;
-            uint64_t one_dilated;
-
-            if constexpr (DIM == 2) {
-                one_dilated = 1ULL << (shift_coord * 2);
-                if (dim_mask == mask_y)
-                    one_dilated <<= 1;
-            } else {
-                one_dilated = 1ULL << (shift_coord * 3);
-                if (dim_mask == mask_y)
-                    one_dilated <<= 1;
-                if (dim_mask == mask_z)
-                    one_dilated <<= 2;
-            }
-
-            if (d > 0) {
-                // Out of the domain iff this axis already sits at its maximum
-                // aligned coordinate for this level. (The old all-ones test only
-                // fired at full resolution, so a coarser boundary cell's +neighbour
-                // wrapped -- to an out-of-range code, or to the origin when the
-                // carry ran off the top of the word -- instead of the sentinel.)
-                const uint64_t domain_mask =
-                    (DIM * max_level >= 64) ? ~0ULL : ((1ULL << (DIM * max_level)) - 1);
-                const uint64_t axis_max = (dim_mask & domain_mask) & ~(one_dilated - 1);
-                if ((current & dim_mask) == axis_max)
-                    return UINT64_MAX;
-
-                uint64_t sum = (current | ~dim_mask) + one_dilated;
-                return (sum & dim_mask) | (current & ~dim_mask);
-            } else {
-                // Boundary Check: If value in dimension is less than step, we underflow
-                if ((current & dim_mask) < one_dilated)
-                    return UINT64_MAX;
-
-                uint64_t diff = (current & dim_mask) - one_dilated;
-                return (diff & dim_mask) | (current & ~dim_mask);
-            }
-        };
-
-        uint64_t next = c;
-        next = add_dim(next, mask_x, dir[0]);
-        next = add_dim(next, mask_y, dir[1]);
-        if constexpr (DIM == 3) {
-            next = add_dim(next, mask_z, dir[2]);
-        }
-        return MortonCode{next};
+        return MortonCode{morton::neighbor_code<DIM>(code.value, level, max_level, dir.data())};
     }
 
     /**

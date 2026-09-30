@@ -188,5 +188,54 @@ AMR_HD inline void decode_3d(MortonCode code, Coordinate& x, Coordinate& y, Coor
     return {x, y, z};
 }
 
+/// Deepest level a tree may use: its Morton codes then stay below 2^63, so
+/// UINT64_MAX (neighbor_code's "no neighbour") is never a cell's code. 21 in
+/// 3D, 31 in 2D.
+[[nodiscard]] AMR_HD constexpr int max_level_limit(int dim) {
+    return dim == 3 ? 21 : 31;
+}
+
+/**
+ * @brief Morton code of a cell's same-level neighbour.
+ * @details The cell `code` at `level` moves dir[k] in {-1, 0, 1} cells along
+ * each axis k, by integer arithmetic on the dilated coordinates, so no
+ * decode/encode round trip is needed. Returns UINT64_MAX when the neighbour
+ * leaves the domain [0, 2^max_level)^DIM, for any move from level 0 (a level-0
+ * cell is the whole domain), and for a level or max_level out of range.
+ */
+template <int DIM>
+[[nodiscard]] AMR_HD inline uint64_t neighbor_code(uint64_t code,
+                                                   int level,
+                                                   int max_level,
+                                                   const int* dir) {
+    constexpr uint64_t kNone = ~uint64_t{0};
+    constexpr uint64_t kAxis = DIM == 3 ? MASK3_X : MASK2_X;  // axis k's bits: kAxis << k
+    if (level < 0 || level > max_level || max_level > max_level_limit(DIM))
+        return kNone;
+    const unsigned shift = static_cast<unsigned>(max_level - level) * DIM;
+    const uint64_t domain = (uint64_t{1} << (DIM * max_level)) - 1;  // DIM * max_level <= 63
+    uint64_t c = code;
+    for (int k = 0; k < DIM; ++k) {
+        if (dir[k] == 0)
+            continue;
+        if (level == 0)
+            return kNone;
+        const uint64_t mask = kAxis << k;
+        const uint64_t one = uint64_t{1} << (shift + static_cast<unsigned>(k));
+        if (dir[k] > 0) {
+            // Out of the domain iff this axis already sits at its largest
+            // coordinate aligned to this level.
+            if ((c & mask) == ((mask & domain) & ~(one - 1)))
+                return kNone;
+            c = (((c | ~mask) + one) & mask) | (c & ~mask);
+        } else {
+            if ((c & mask) < one)
+                return kNone;
+            c = (((c & mask) - one) & mask) | (c & ~mask);
+        }
+    }
+    return c;
+}
+
 }  // namespace morton
 }  // namespace amr
