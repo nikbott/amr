@@ -52,7 +52,7 @@ The pure-Python `Quadtree`/`Octree` formerly served as the parity oracle: its
 balance predicate ("o,r unbalanced only if o ∈ I(r)") is exactly a `lower_bound`
 insulation check, validated as a trustworthy ground truth. The Python backend
 was **removed** (2026-06-05) once the in-tree C++ `balance_ref()` oracle (the
-brute-force reference in `omp/tests.cpp` / `cuda/tree.cuh`) subsumed that role;
+brute-force reference in `omp/tree.hpp` / `cuda/tree.cuh`) subsumed that role;
 cross-backend parity now compares omp ↔ mpi ↔ cuda directly. The canonical AMR
 invariants (sorted+unique, volume=1, 2:1, Morton round-trip, idempotent balance)
 remain asserted in the C++ Catch2 suites.
@@ -64,7 +64,7 @@ remain asserted in the C++ Catch2 suites.
 3. **mpi/ single-round insulation-layer balance** ([IBG2012]) — removes per-pass halo communication. *(Recommended, not correctness.)* Open.
 4. **mpi/ ghost construction ∝ boundary** ([IBWG2015]) — enumerate only partition-boundary leaves. Open; pairs with #3.
 5. **Weighted/Hilbert partitioning** for crack imbalance — only if a per-octant cost model shows deep octants are costlier; Hilbert lowers halo surface. Open.
-6. ~~**Oracle invariant coverage**~~ — **done**: sorted and unique leaves, volume = 1, 2:1, Morton round-trip and idempotent balance are asserted in `omp/tests.cpp`, and `verify()` checks levels, alignment and the domain (189ad7c).
+6. ~~**Oracle invariant coverage**~~ — **done**: sorted and unique leaves, volume = 1, 2:1, Morton round-trip and idempotent balance are asserted in `omp/test_core.cpp` and `omp/test_tree.cpp`, and `verify()` checks levels, alignment and the domain (189ad7c).
 
 ## Caveats (from the verified pass)
 
