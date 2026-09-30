@@ -63,22 +63,23 @@ struct Constraint {
 /// Unstructured mesh of shapes of one dimension. Indices are 0-based.
 struct Mesh {
     int dim = 2;
-    std::vector<Point> pos;        ///< z = 0 in 2D, as in the DIC meshes
-    std::vector<Shape> type;       ///< one per element
-    std::vector<Index> offset{0};  ///< element e's vertices: con[offset[e] .. offset[e + 1])
-    std::vector<Index> con;        ///< vertices in each shape's node order
-    std::vector<Constraint> hn;    ///< hanging nodes
+    std::vector<Point> pos;              ///< z = 0 in 2D, as in the DIC meshes
+    std::vector<Shape> type;             ///< one per element
+    std::vector<std::size_t> offset{0};  ///< element e's vertices: con[offset[e] .. offset[e + 1])
+    std::vector<Index> con;              ///< vertices in each shape's node order
+    std::vector<Constraint> hn;          ///< hanging nodes
 
     [[nodiscard]] Index num_elements() const { return static_cast<Index>(type.size()); }
     [[nodiscard]] std::span<const Index> element(Index e) const {
-        const auto b = static_cast<std::size_t>(offset[static_cast<std::size_t>(e)]);
-        const auto n = static_cast<std::size_t>(offset[static_cast<std::size_t>(e) + 1]) - b;
-        return {con.data() + b, n};
+        const auto k = static_cast<std::size_t>(e);
+        return {con.data() + offset[k], offset[k + 1] - offset[k]};
     }
     void add(Shape s, std::span<const Index> vertices) {
+        if (type.size() >= static_cast<std::size_t>(std::numeric_limits<Index>::max()))
+            throw std::overflow_error("simplex: element count exceeds the index type");
         type.push_back(s);
         con.insert(con.end(), vertices.begin(), vertices.end());
-        offset.push_back(static_cast<Index>(con.size()));
+        offset.push_back(con.size());
     }
     void add(Shape s, std::initializer_list<Index> vertices) {
         add(s, std::span<const Index>(vertices.begin(), vertices.size()));
@@ -126,8 +127,8 @@ Csr make_csr(std::size_t n_keys, std::size_t n_items, KeyOf key_of, ValueOf valu
 inline Csr node_elements(const Mesh& m) {
     std::vector<Index> element_of(m.con.size());
     for (Index e = 0; e < m.num_elements(); ++e)
-        for (auto i = static_cast<std::size_t>(m.offset[static_cast<std::size_t>(e)]);
-             i < static_cast<std::size_t>(m.offset[static_cast<std::size_t>(e) + 1]);
+        for (auto i = m.offset[static_cast<std::size_t>(e)];
+             i < m.offset[static_cast<std::size_t>(e) + 1];
              ++i)
             element_of[i] = e;
     return make_csr(
@@ -151,28 +152,43 @@ inline bool has_all(const Mesh& m, const Csr& adj, std::span<const Index> nodes)
     return false;
 }
 
+/// Parents of a node, sorted, padded with -1: the key that makes neighbours
+/// share it. No element has more than 8 vertices, so no node more parents.
+using NodeKey = std::array<Index, 8>;
+
 inline void validate(const Mesh& m) {
     if (m.dim != 2 && m.dim != 3)
         throw std::invalid_argument("simplex: dim must be 2 or 3, got " + std::to_string(m.dim));
+    constexpr auto kMax = static_cast<std::size_t>(std::numeric_limits<Index>::max());
+    if (m.type.size() > kMax || m.pos.size() > kMax)
+        throw std::overflow_error("simplex: mesh exceeds the index type");
     if (m.offset.size() != m.type.size() + 1 || m.offset.front() != 0 ||
-        static_cast<std::size_t>(m.offset.back()) != m.con.size())
+        m.offset.back() != m.con.size())
         throw std::invalid_argument("simplex: offset does not match type and con");
     for (std::size_t e = 0; e < m.type.size(); ++e) {
         const auto& t = element_type(m.type[e]);
         if (t.dim != m.dim)
             throw std::invalid_argument("simplex: element of another dimension");
-        if (m.offset[e + 1] - m.offset[e] != t.vertices)
+        if (m.offset[e + 1] - m.offset[e] != static_cast<std::size_t>(t.vertices))
             throw std::invalid_argument("simplex: offset does not match the element's shape");
     }
     const auto n = static_cast<Index>(m.pos.size());
     const auto in_range = [n](Index v) { return v >= 0 && v < n; };
     if (!std::all_of(m.con.begin(), m.con.end(), in_range))
         throw std::out_of_range("simplex: element vertex out of range");
+    NodeKey sorted;
     for (const auto& h : m.hn) {
-        if (h.parent.empty() || h.parent.size() != h.weight.size())
-            throw std::invalid_argument("simplex: a constraint needs one weight per parent");
+        if (h.parent.empty() || h.parent.size() > sorted.size() ||
+            h.parent.size() != h.weight.size())
+            throw std::invalid_argument(
+                "simplex: a constraint needs 1 to 8 parents, with one weight each");
         if (!in_range(h.node) || !std::all_of(h.parent.begin(), h.parent.end(), in_range))
             throw std::out_of_range("simplex: constraint node out of range");
+        const auto end = std::copy(h.parent.begin(), h.parent.end(), sorted.begin());
+        std::sort(sorted.begin(), end);
+        if (std::adjacent_find(sorted.begin(), end) != end ||
+            std::binary_search(sorted.begin(), end, h.node))
+            throw std::invalid_argument("simplex: a constraint's parents must be distinct nodes");
         double sum = 0.0;
         for (double w : h.weight)
             sum += w;
@@ -180,10 +196,6 @@ inline void validate(const Mesh& m) {
             throw std::invalid_argument("simplex: constraint weights must sum to 1");
     }
 }
-
-/// Parents of a node, sorted, padded with -1: the key that makes neighbours
-/// share it.
-using NodeKey = std::array<Index, 8>;
 
 struct NodeKeyHash {
     std::size_t operator()(const NodeKey& k) const {
@@ -206,10 +218,8 @@ inline void sort_row(Constraint& row) {
         }
 }
 
+/// The key of a row with sorted parents, at most 8 of them (validate()).
 inline NodeKey key_of(const Constraint& sorted) {
-    if (sorted.parent.size() > NodeKey{}.size())
-        throw std::invalid_argument(
-            "simplex: a node has more parents than any element has vertices");
     NodeKey k;
     k.fill(-1);
     std::copy(sorted.parent.begin(), sorted.parent.end(), k.begin());
@@ -324,23 +334,34 @@ inline Refinement detail::refine_valid(const Mesh& mesh, std::span<const Index> 
     Mesh& m = out.mesh;
     m.dim = mesh.dim;
     m.pos = mesh.pos;
-    std::size_t n_children = 0, n_new = 0;
+    std::size_t n_children = 0, n_con = 0, n_new = 0;
     for (Index e = 0; e < n_elem; ++e)
         if (marked[static_cast<std::size_t>(e)]) {
             const auto& red = element_type(mesh.type[static_cast<std::size_t>(e)]).red;
-            n_children += red.children();
+            for (const auto* part : {&red.head, &red.choices.front(), &red.tail})
+                for (const auto& c : *part) {
+                    ++n_children;
+                    n_con += c.node.size();
+                }
             n_new += red.new_nodes.size();
         }
     m.type.reserve(mesh.type.size() + n_children);
     m.offset.reserve(mesh.offset.size() + n_children);
-    m.con.reserve(mesh.con.size() + n_children * 8);
+    m.con.reserve(mesh.con.size() + n_con);
 
-    std::unordered_map<detail::NodeKey, Index, detail::NodeKeyHash> node_of;
-    node_of.reserve(mesh.hn.size() + n_new);
-    for (const auto& h : mesh.hn) {
-        Constraint row = h;
-        detail::sort_row(row);
-        node_of.emplace(detail::key_of(row), h.node);
+    // Nodes by their parents: the listed hanging nodes (row >= 0 in `old`),
+    // then the new ones (row -1, prolongation[node - n_old]).
+    struct Known {
+        Index node;
+        Index row;
+    };
+    const auto n_old = static_cast<Index>(mesh.pos.size());
+    std::vector<Constraint> old = mesh.hn;
+    std::unordered_map<detail::NodeKey, Known, detail::NodeKeyHash> node_of;
+    node_of.reserve(old.size() + n_new);
+    for (std::size_t r = 0; r < old.size(); ++r) {
+        detail::sort_row(old[r]);
+        node_of.emplace(detail::key_of(old[r]), Known{old[r].node, static_cast<Index>(r)});
     }
     Constraint row;
     const auto new_node = [&](const LatticeNode& lattice, std::span<const Index> v) {
@@ -350,22 +371,31 @@ inline Refinement detail::refine_valid(const Mesh& mesh, std::span<const Index> 
             row.parent.push_back(v[static_cast<std::size_t>(i)]);
         detail::sort_row(row);
         const auto [it, created] =
-            node_of.try_emplace(detail::key_of(row), static_cast<Index>(m.pos.size()));
-        if (created) {
-            if (m.pos.size() >= static_cast<std::size_t>(std::numeric_limits<Index>::max()))
-                throw std::overflow_error("simplex: node count exceeds the index type");
-            const auto x = [&m](Index n) { return m.pos[static_cast<std::size_t>(n)]; };
-            Point p = x(row.parent[0]);
-            for (auto& c : p)
-                c *= row.weight[0];
-            for (std::size_t k = 1; k < row.parent.size(); ++k)
-                for (std::size_t c = 0; c < 3; ++c)
-                    p[c] += row.weight[k] * x(row.parent[k])[c];
-            m.pos.push_back(p);
-            row.node = it->second;
-            out.prolongation.push_back(row);
+            node_of.try_emplace(detail::key_of(row), Known{static_cast<Index>(m.pos.size()), -1});
+        const Index node = it->second.node;
+        if (!created) {  // a node that exists must be the lattice point asked for
+            const auto& weight =
+                it->second.row >= 0
+                    ? old[static_cast<std::size_t>(it->second.row)].weight
+                    : out.prolongation[static_cast<std::size_t>(node - n_old)].weight;
+            if (weight != row.weight)
+                throw std::invalid_argument("simplex: hanging node " + std::to_string(node) +
+                                            " is not where its parents' refinement puts it");
+            return node;
         }
-        return it->second;
+        if (m.pos.size() >= static_cast<std::size_t>(std::numeric_limits<Index>::max()))
+            throw std::overflow_error("simplex: node count exceeds the index type");
+        const auto x = [&m](Index n) { return m.pos[static_cast<std::size_t>(n)]; };
+        Point p = x(row.parent[0]);
+        for (auto& c : p)
+            c *= row.weight[0];
+        for (std::size_t k = 1; k < row.parent.size(); ++k)
+            for (std::size_t c = 0; c < 3; ++c)
+                p[c] += row.weight[k] * x(row.parent[k])[c];
+        m.pos.push_back(p);
+        row.node = node;
+        out.prolongation.push_back(row);
+        return node;
     };
 
     std::vector<Index> local, child;
@@ -402,12 +432,9 @@ inline Refinement detail::refine_valid(const Mesh& mesh, std::span<const Index> 
     for (const auto& r : out.prolongation)
         if (detail::has_all(m, adj, r.parent))
             m.hn.push_back(r);
-    for (const auto& h : mesh.hn) {
-        Constraint old = h;
-        detail::sort_row(old);
-        if (detail::has_all(m, adj, old.parent))
-            m.hn.push_back(std::move(old));
-    }
+    for (auto& h : old)
+        if (detail::has_all(m, adj, h.parent))
+            m.hn.push_back(std::move(h));
     return out;
 }
 

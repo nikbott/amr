@@ -19,9 +19,7 @@
 
 namespace amr::simplex::test {
 
-inline Point sub(const Point& a, const Point& b) {
-    return {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
-}
+using detail::sub;
 
 inline Point midpoint(const Point& a, const Point& b) {
     return {0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2])};
@@ -34,20 +32,9 @@ inline std::vector<Point> positions(const Mesh& m, Index e) {
     return x;
 }
 
-/// Signed measure of element e: the cofactor expansion for simplices,
-/// element.hpp's for the other shapes.
+/// Signed measure of element e (element.hpp's, not adapt's measure()).
 inline double signed_measure(const Mesh& m, Index e) {
-    const Shape s = m.type[static_cast<std::size_t>(e)];
-    const auto x = positions(m, e);
-    if (s != Shape::T3 && s != Shape::T4)
-        return amr::simplex::signed_measure(s, x);
-    const Point u = sub(x[1], x[0]), w = sub(x[2], x[0]);
-    if (s == Shape::T3)
-        return 0.5 * (u[0] * w[1] - u[1] * w[0]);
-    const Point y = sub(x[3], x[0]);
-    return (u[0] * (w[1] * y[2] - w[2] * y[1]) - u[1] * (w[0] * y[2] - w[2] * y[0]) +
-            u[2] * (w[0] * y[1] - w[1] * y[0])) /
-           6.0;
+    return amr::simplex::signed_measure(m.type[static_cast<std::size_t>(e)], positions(m, e));
 }
 
 inline double total_measure(const Mesh& m) {
@@ -81,7 +68,7 @@ inline void add_oriented(Mesh& m, Shape s, std::vector<Index> v) {
             std::rotate(v.begin(), v.begin() + 3, v.end());
             break;
     }
-    const auto first = static_cast<std::size_t>(m.offset[m.offset.size() - 2]);
+    const auto first = m.offset[m.offset.size() - 2];
     std::copy(v.begin(), v.end(), m.con.begin() + static_cast<std::ptrdiff_t>(first));
 }
 
@@ -144,16 +131,19 @@ struct LatticeMesh {
 };
 
 /// n x n cells of side 2, each a quadrilateral or two triangles (either
-/// diagonal) at random: a conforming hybrid 2D mesh with integer nodes.
+/// diagonal) at random, the first cell a quadrilateral and the second two
+/// triangles: a conforming hybrid 2D mesh with integer nodes. The choices
+/// use mt19937's raw output, which the standard fixes, so the mesh is the
+/// same with every standard library.
 inline Mesh hybrid_2d(int n, std::mt19937& rng) {
     LatticeMesh g;
     g.mesh.dim = 2;
-    std::uniform_int_distribution<int> pick(0, 2);
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j) {
             const Index a = g.at(2 * i, 2 * j, 0), b = g.at(2 * i + 2, 2 * j, 0);
             const Index c = g.at(2 * i + 2, 2 * j + 2, 0), d = g.at(2 * i, 2 * j + 2, 0);
-            switch (pick(rng)) {
+            const int cell = i * n + j;
+            switch (cell < 2 ? static_cast<std::uint32_t>(cell) : rng() % 3) {
                 case 0:
                     add_oriented(g.mesh, Shape::Q4, {a, b, c, d});
                     break;
@@ -174,10 +164,12 @@ inline Mesh hybrid_2d(int n, std::mt19937& rng) {
 /// centre, at random; layer 1 pyramid cells whose top pyramid is cut into 2
 /// tetrahedra; layer 2 Kuhn cells of 6 tetrahedra; layer 3 pairs of prisms.
 /// Triangulated faces all take the diagonal through the cell's low corner.
+/// Layer 0's first column is a hexahedron and its second a pyramid cell; the
+/// rest use mt19937's raw output, so the mesh is the same with every
+/// standard library.
 inline Mesh hybrid_3d(int n, std::mt19937& rng) {
     LatticeMesh g;
     g.mesh.dim = 3;
-    std::bernoulli_distribution hex(0.5);
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
             for (int layer = 0; layer < 4; ++layer) {
@@ -185,7 +177,8 @@ inline Mesh hybrid_3d(int n, std::mt19937& rng) {
                 const auto c = [&](int dx, int dy, int dz) {
                     return g.at(x + 2 * dx, y + 2 * dy, z + 2 * dz);
                 };
-                if (layer == 0 && hex(rng)) {
+                const int column = i * n + j;
+                if (layer == 0 && (column < 2 ? column == 0 : rng() % 2 == 0)) {
                     add_oriented(g.mesh,
                                  Shape::H8,
                                  {c(0, 0, 0),
@@ -239,10 +232,13 @@ inline Mesh hybrid_3d(int n, std::mt19937& rng) {
     return g.mesh;
 }
 
+/// A random ceil(fraction * n) of 0..n-1. Fisher-Yates on mt19937's raw
+/// output (std::shuffle differs between standard libraries).
 inline std::vector<Index> random_subset(Index n, double fraction, std::mt19937& rng) {
     std::vector<Index> all(static_cast<std::size_t>(n));
     std::iota(all.begin(), all.end(), 0);
-    std::shuffle(all.begin(), all.end(), rng);
+    for (std::size_t i = all.size(); i > 1; --i)
+        std::swap(all[i - 1], all[rng() % i]);
     all.resize(static_cast<std::size_t>(std::ceil(fraction * n)));
     return all;
 }

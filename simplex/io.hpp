@@ -166,10 +166,8 @@ inline Payload read(const std::string& path) {
             throw std::runtime_error("SMX2: " + path + " has an element that is unknown or not " +
                                      std::to_string(dim) + "D");
         n_con += static_cast<std::uint64_t>(element_type(static_cast<Shape>(t)).vertices);
-        if (n_con > kMax)
-            throw std::runtime_error("SMX2: counts exceed the index type");
         p.mesh.type.push_back(static_cast<Shape>(t));
-        p.mesh.offset.push_back(static_cast<Index>(n_con));
+        p.mesh.offset.push_back(static_cast<std::size_t>(n_con));
     }
     p.mesh.con = detail::take<Index>(in, n_con, left, path);
     const auto node = detail::take<Index>(in, counts[2], left, path);

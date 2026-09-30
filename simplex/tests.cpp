@@ -209,6 +209,20 @@ TEST_CASE("Balanced random refinement keeps nodes, measure and hanging nodes con
     }
 }
 
+TEST_CASE("A listed node is reused only at the point the refinement needs", "[simplex]") {
+    // Two triangles sharing edge 1-2, with node 4 listed on that edge. Its
+    // weights must be those of the midpoint the neighbour's refinement needs.
+    Mesh m;
+    m.pos = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}, {0.5, 0.5, 0}};
+    add_element(m, {0, 1, 2});
+    add_element(m, {1, 3, 2});
+    m.hn = {{4, {1, 2}, {0.5, 0.5}}};
+    const auto r = refine(m, std::vector<Index>{0});
+    CHECK(r.prolongation.size() == 2);  // the midpoint of 1-2 is node 4
+    m.hn = {{4, {1, 2}, {0.25, 0.75}}};
+    CHECK_THROWS_AS(refine(m, std::vector<Index>{0}), std::invalid_argument);
+}
+
 TEST_CASE("Hanging nodes come out with their parents ascending", "[simplex]") {
     // MATLAB may list a hanging node's parents in either order.
     std::mt19937 rng(23);
@@ -306,12 +320,16 @@ TEST_CASE("Invalid input is rejected", "[simplex]") {
     rejects(bad);
     bad.type = {Shape::Q4};
     CHECK_NOTHROW(refine(bad, std::vector<Index>{0}));
-    const std::vector<Constraint> bad_rows{{5, {0, 1}, {0.5, 0.5}},   // node out of range
-                                           {2, {0, 7}, {0.5, 0.5}},   // parent out of range
-                                           {2, {}, {}},               // no parents
-                                           {2, {0, 1}, {0.5}},        // a weight missing
-                                           {2, {0, 1}, {0.5, 0.25}},  // weights not summing to 1
-                                           {2, {0, 1}, {std::nan(""), 0.5}}};
+    const std::vector<Constraint> bad_rows{
+        {5, {0, 1}, {0.5, 0.5}},   // node out of range
+        {2, {0, 7}, {0.5, 0.5}},   // parent out of range
+        {2, {}, {}},               // no parents
+        {2, {0, 1}, {0.5}},        // a weight missing
+        {2, {0, 1}, {0.5, 0.25}},  // weights not summing to 1
+        {2, {0, 1}, {std::nan(""), 0.5}},
+        {2, {0, 0}, {0.5, 0.5}},  // a repeated parent
+        {2, {2, 0}, {0.5, 0.5}},  // its own parent
+        {2, {0, 1, 0, 1, 0, 1, 0, 1, 0}, std::vector<double>(9, 1.0 / 9)}};
     for (const auto& row : bad_rows) {
         bad = m;
         bad.hn = {row};
