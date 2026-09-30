@@ -1,7 +1,7 @@
 /**
  * @file tests.cu
  * @brief Complete Validation Suite for CUDA AMR (Literature Compliance).
- * @details Adapts all test cases from omp/tests.cpp.
+ * @details Adapts the test cases of omp/test_*.cpp.
  * CRITICAL: Uses independent geometric verification for 2:1 balance.
  */
 #include <algorithm>
@@ -36,7 +36,7 @@ using namespace amr;
 
 // ==================================================================================
 // HELPER: Robust Balance Verification (Geometric / Brute Force)
-// Matches logic in omp/tests.cpp: count_balance_violations
+// Matches logic in omp/test_util.hpp: count_balance_violations
 // ==================================================================================
 template <int DIM>
 int count_balance_violations(const std::vector<uint64_t>& codes,
