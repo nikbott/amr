@@ -161,6 +161,10 @@ endif()
 add_executable(amr_simplex simplex/cli.cpp)
 target_link_libraries(amr_simplex PRIVATE simplex)
 
+# Throughput of one solver cycle on growing 2D and 3D meshes.
+add_executable(amr_simplex_bench simplex/bench.cpp)
+target_link_libraries(amr_simplex_bench PRIVATE simplex)
+
 if(BUILD_TESTING)
   add_executable(
     amr_simplex_tests
