@@ -2,13 +2,16 @@
  * @file bench.cpp
  * @brief Throughput of one solver cycle (adapt) on growing meshes.
  *
- * @details For 2D and 3D structured seeds of growing size, two warm-up cycles
- * refine towards a smooth error bump, so the timed mesh has hanging nodes as
- * the solver's do. Then one call of adapt, with the report's marking
- * (θ = 0.70, β = 0.30, and its size floor: 3.5 px in 2D, 12.5 vx in 3D), is
- * timed whole, validation included, best of three. Prints the call's wall
- * time, its stages and the input elements processed per second. Nothing is
- * checked here: the tests do that.
+ * @details For 2D and 3D structured seeds of growing size on the report's
+ * domains, two warm-up cycles refine towards a smooth error bump, so the timed
+ * mesh has hanging nodes as the solver's do. Then one call of adapt, with the
+ * report's marking (θ = 0.70, β = 0.30), is timed whole, validation included,
+ * best of three. The size floor sits, as in both of the report's modalities,
+ * about three generations below the seed: just under the third, so the timed
+ * call refines one generation past the warm-ups. (The report's absolute
+ * floors, 3.5 px and 12.5 vx, would stop every seed finer than its own.)
+ * Prints the call's wall time, its stages and the input elements processed
+ * per second. Nothing is checked here: the tests do that.
  *
  *   amr_simplex_bench [max_elements]
  *
@@ -87,7 +90,6 @@ int main(int argc, char** argv) try {
         AdaptParams p;
         p.marking.theta = 0.70;
         p.marking.max_refine_fraction = 0.30;
-        p.marking.min_element_length = dim == 2 ? 3.5 : 12.5;
         for (Index n = dim == 2 ? 32 : 8;; n *= 2) {
             const double seed = dim == 2 ? 2.0 * std::pow(n - 1, 2) : 6.0 * std::pow(n - 1, 3);
             if (seed > max_elements)
@@ -95,6 +97,9 @@ int main(int argc, char** argv) try {
             Mesh m = structured(dims,
                                 std::vector<Index>(static_cast<std::size_t>(dim), n),
                                 std::vector<double>(static_cast<std::size_t>(dim), 0.0));
+            // The seed's elements all have the same size L; its third
+            // generation has L / 8.
+            p.marking.min_element_length = 0.9 * std::pow(measure(m, 0), 1.0 / dim) / 8;
             std::vector<double> error, ratio;
             for (int warm = 0; warm < 2; ++warm) {
                 bump(m, dims, error, ratio);
