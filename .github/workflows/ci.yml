@@ -62,12 +62,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Two-compiler coverage. clang's LLVM OpenMP runtime (libomp-17-dev) is
-        # installed only in the clang jobs (see step below) so a clang-specific
-        # package never blocks the gcc jobs' apt install.
+        # Two-compiler coverage, each the newest release on the runner image;
+        # local builds cover GCC 13, the MATLAB MEX toolchain. clang's LLVM
+        # OpenMP runtime (libomp-18-dev) is installed only in the clang jobs
+        # (see step below) so a clang-specific package never blocks the gcc
+        # jobs' apt install.
         compiler:
-          - { cc: gcc-13, cxx: g++-13 }
-          - { cc: clang-17, cxx: clang++-17 }
+          - { cc: gcc-14, cxx: g++-14 }
+          - { cc: clang-18, cxx: clang++-18 }
         build_type: [Debug, Release]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -80,12 +82,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libomp-dev \
-            openmpi-bin libopenmpi-dev catch2 ccache
+            openmpi-bin libopenmpi-dev catch2 ccache ${{ matrix.compiler.cxx }}
       # clang needs the matching LLVM OpenMP runtime for CMake's FindOpenMP.
       # Scoped to clang jobs so this package can't break the gcc matrix entry.
       - name: Install clang OpenMP runtime
         if: startsWith(matrix.compiler.cc, 'clang')
-        run: sudo apt-get install -y clang-17 libomp-17-dev
+        run: sudo apt-get install -y clang-18 libomp-18-dev
       - uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
