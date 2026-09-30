@@ -529,7 +529,8 @@ TEST_CASE("Edges and faces are those of the convex reference element", "[element
                                          return g.contains(a) && g.contains(b);
                                      }) == 2)
                             edges.insert({a, b});
-            CHECK(static_cast<int>(n - edges.size() + faces.size()) == 2);  // Euler
+            CHECK(n - static_cast<int>(edges.size()) + static_cast<int>(faces.size()) ==
+                  2);  // Euler
         }
         std::set<std::set<int>> declared_edges, declared_faces;
         for (const auto& [a, b] : t.edges)
