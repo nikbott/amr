@@ -452,19 +452,29 @@ inline const std::map<Shape, ElementType>& element_types() {
     return types;
 }
 
+/// element_types() indexed by shape code, for constant-time lookup.
+inline const std::array<const ElementType*, 256>& element_type_table() {
+    static const auto table = [] {
+        std::array<const ElementType*, 256> t{};
+        for (const auto& [shape, type] : element_types())
+            t[static_cast<std::size_t>(shape)] = &type;
+        return t;
+    }();
+    return table;
+}
+
 }  // namespace detail
 
 inline bool known_shape(std::uint8_t code) {
-    return detail::element_types().contains(static_cast<Shape>(code));
+    return detail::element_type_table()[code] != nullptr;
 }
 
 inline const ElementType& element_type(Shape s) {
-    const auto& types = detail::element_types();
-    const auto it = types.find(s);
-    if (it == types.end())
+    const auto* t = detail::element_type_table()[static_cast<std::size_t>(s)];
+    if (t == nullptr)
         throw std::invalid_argument("element: unknown shape code " +
                                     std::to_string(static_cast<int>(s)));
-    return it->second;
+    return *t;
 }
 
 namespace detail {
