@@ -90,7 +90,7 @@ TEST_CASE("adapt is marking, then balance, then refinement", "[adapt]") {
         const auto a = adapt(m, error, ratio, p);
         REQUIRE(a.status == AdaptStatus::refined);
         const std::vector<Index> growth(static_cast<std::size_t>(m.num_elements()),
-                                        dim == 2 ? 3 : 7);
+                                        dim == 2 ? 3 : 7);  // 4 or 8 children
         const auto marking =
             amr::marking::mark(error, ratio, element_lengths(m), growth, p.marking);
         CHECK(a.marking.selected == marking.selected);
@@ -98,9 +98,10 @@ TEST_CASE("adapt is marking, then balance, then refinement", "[adapt]") {
         CHECK(a.balanced == balanced);
         const auto r = refine(m, balanced);
         CHECK(a.refinement.mesh.pos == r.mesh.pos);
+        CHECK(a.refinement.mesh.type == r.mesh.type);
         CHECK(a.refinement.mesh.con == r.mesh.con);
         CHECK(a.refinement.mesh.hn == r.mesh.hn);
-        CHECK(a.refinement.parents == r.parents);
+        CHECK(a.refinement.prolongation == r.prolongation);
         CHECK(std::all_of(a.seconds.begin(), a.seconds.end(), [](double t) { return t >= 0.0; }));
         m = a.refinement.mesh;
     }

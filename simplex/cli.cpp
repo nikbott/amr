@@ -1,6 +1,7 @@
 /**
  * @file cli.cpp
- * @brief Command-line front end to the simplex engine over SMX2 files (io.hpp).
+ * @brief Command-line front end to the unstructured engine over SMX2 files
+ * (io.hpp).
  *
  * @details Lets MATLAB drive the engine through files:
  *
@@ -55,10 +56,10 @@ void add_prolongation(const Refinement& r,
     auto& count = ints["prolongation_count"];
     auto& parents = ints["prolongation_parents"];
     auto& weights = doubles["prolongation_weights"];
-    for (const auto& p : r.parents) {
-        count.push_back(2);
-        parents.insert(parents.end(), p.begin(), p.end());
-        weights.insert(weights.end(), {0.5, 0.5});
+    for (const auto& row : r.prolongation) {
+        count.push_back(static_cast<Index>(row.parent.size()));
+        parents.insert(parents.end(), row.parent.begin(), row.parent.end());
+        weights.insert(weights.end(), row.weight.begin(), row.weight.end());
     }
 }
 

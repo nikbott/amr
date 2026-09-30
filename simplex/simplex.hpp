@@ -1,31 +1,32 @@
 /**
  * @file simplex.hpp
- * @brief Red refinement of unstructured triangle (T3) and tetrahedron (T4)
- * meshes with hanging nodes and 1-irregular balance.
+ * @brief Red refinement of unstructured and hybrid meshes with hanging nodes
+ * and 1-irregular balance.
  *
- * @details The simplicial counterpart of the Morton octree. It holds the
- * unstructured meshes the FE-DIC solver correlates on and refines listed
- * elements, reproducing the MATLAB `mesh_subdivide_list` and
- * `mesh_balance_refine_list` it replaces up to node and element numbering:
+ * @details The unstructured counterpart of the Morton octree. Its meshes may
+ * mix any shapes of element.hpp of one dimension: triangles and
+ * quadrilaterals in 2D; tetrahedra, hexahedra, prisms and pyramids in 3D. The
+ * refinement itself is element-agnostic; each shape's reference element says
+ * how it splits:
  *
- * - A triangle splits into its 4 edge-midpoint triangles.
- * - A tetrahedron splits into its 4 corner tetrahedra plus the inner
- *   octahedron cut along one of its 3 diagonals [Bey1995]. The diagonal is
- *   the one whose worst child has the highest mean-ratio quality
- *   12 (3|V|)^(2/3) / sum(l^2), which keeps the shape classes of a
- *   structured seed bounded [Zhang1995]. Exact ties go to the first
- *   diagonal in kOctahedron order, which depends on the parent's vertex
- *   order.
+ * - A refined element's new nodes are its template's lattice nodes, each a
+ *   weighted mean of the element's vertices. A node is keyed by its parents,
+ *   so neighbours sharing an edge or a face share its nodes, and a listed
+ *   hanging node is reused rather than duplicated.
+ * - A shape with several splits (the tetrahedron's 3 octahedron diagonals
+ *   [Bey1995]) takes the one whose worst child has the highest mean-ratio
+ *   quality [Zhang1995]; ties go to the earliest split.
+ * - A node hangs while some element still has all of its parents, i.e. the
+ *   unrefined edge or face it sits on. Its constraint is its prolongation row.
+ *   Lists are closed under balance_closure() first, which keeps the mesh
+ *   1-irregular: no hanging node has a hanging parent.
  *
- * Midpoints are keyed by their edge, so neighbours share them, and a
- * listed hanging node on that edge is reused rather than duplicated. After
- * refinement a node hangs while some element still has its parent edge.
- * Lists are closed under balance_closure() first, which keeps the mesh
- * 1-irregular: no hanging node has a hanging parent.
- *
- * Children keep the parent's orientation. A new node's coordinates are
- * computed as 0.5 * (a + b), which is exactly the value MATLAB's S * pos
- * produces, so meshes can be compared coordinate-exact.
+ * On triangle and tetrahedron meshes this reproduces the FE-DIC solver's
+ * MATLAB `mesh_subdivide_list` and `mesh_balance_refine_list` exactly, node
+ * and element numbering included, since correlation round-off depends on
+ * them. A new node's coordinates are the weighted sum of its parents' in
+ * ascending parent order: for a midpoint exactly 0.5 * (a + b), the value
+ * MATLAB's S * pos produces.
  */
 #pragma once
 
@@ -34,6 +35,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <initializer_list>
 #include <limits>
 #include <span>
 #include <stdexcept>
@@ -42,43 +45,54 @@
 #include <utility>
 #include <vector>
 
+#include "element.hpp"
+
 namespace amr::simplex {
 
 using Index = std::int32_t;
-using Point = std::array<double, 3>;
 
-/// Unstructured T3 (dim 2) or T4 (dim 3) mesh. Indices are 0-based.
+/// Node `node` as a weighted sum of its parents: a hanging node's constraint,
+/// or a new node's prolongation row.
+struct Constraint {
+    Index node = 0;
+    std::vector<Index> parent;   ///< ascending in the engine's output
+    std::vector<double> weight;  ///< one per parent, summing to 1
+    bool operator==(const Constraint&) const = default;
+};
+
+/// Unstructured mesh of shapes of one dimension. Indices are 0-based.
 struct Mesh {
     int dim = 2;
-    std::vector<Point> pos;                ///< z = 0 in 2D, as in the DIC meshes
-    std::vector<Index> con;                ///< row-major, dim + 1 vertices per element
-    std::vector<std::array<Index, 3>> hn;  ///< {hanging node, parent, parent}
+    std::vector<Point> pos;        ///< z = 0 in 2D, as in the DIC meshes
+    std::vector<Shape> type;       ///< one per element
+    std::vector<Index> offset{0};  ///< element e's vertices: con[offset[e] .. offset[e + 1])
+    std::vector<Index> con;        ///< vertices in each shape's node order
+    std::vector<Constraint> hn;    ///< hanging nodes
 
-    [[nodiscard]] int vertices_per_element() const { return dim + 1; }
-    [[nodiscard]] Index num_elements() const {
-        return static_cast<Index>(con.size() / static_cast<std::size_t>(vertices_per_element()));
-    }
+    [[nodiscard]] Index num_elements() const { return static_cast<Index>(type.size()); }
     [[nodiscard]] std::span<const Index> element(Index e) const {
-        const auto nv = static_cast<std::size_t>(vertices_per_element());
-        return {con.data() + static_cast<std::size_t>(e) * nv, nv};
+        const auto b = static_cast<std::size_t>(offset[static_cast<std::size_t>(e)]);
+        const auto n = static_cast<std::size_t>(offset[static_cast<std::size_t>(e) + 1]) - b;
+        return {con.data() + b, n};
+    }
+    void add(Shape s, std::span<const Index> vertices) {
+        type.push_back(s);
+        con.insert(con.end(), vertices.begin(), vertices.end());
+        offset.push_back(static_cast<Index>(con.size()));
+    }
+    void add(Shape s, std::initializer_list<Index> vertices) {
+        add(s, std::span<const Index>(vertices.begin(), vertices.size()));
     }
 };
 
 /// A refined mesh and its prolongation U_new = S U_old: node i < n_old keeps
-/// its value, and new node n_old + k takes the mean of parents[k].
+/// its value, and new node n_old + k is prolongation[k].
 struct Refinement {
     Mesh mesh;
-    std::vector<std::array<Index, 2>> parents;
+    std::vector<Constraint> prolongation;
 };
 
 namespace detail {
-
-inline std::uint64_t edge_key(Index a, Index b) {
-    if (a > b)
-        std::swap(a, b);
-    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(a)) << 32) |
-           static_cast<std::uint32_t>(b);
-}
 
 /// Items grouped by an integer key, in compressed-row form.
 struct Csr {
@@ -110,104 +124,96 @@ Csr make_csr(std::size_t n_keys, std::size_t n_items, KeyOf key_of, ValueOf valu
 
 /// Elements incident to each node.
 inline Csr node_elements(const Mesh& m) {
-    const auto nv = static_cast<std::size_t>(m.vertices_per_element());
+    std::vector<Index> element_of(m.con.size());
+    for (Index e = 0; e < m.num_elements(); ++e)
+        for (auto i = static_cast<std::size_t>(m.offset[static_cast<std::size_t>(e)]);
+             i < static_cast<std::size_t>(m.offset[static_cast<std::size_t>(e) + 1]);
+             ++i)
+            element_of[i] = e;
     return make_csr(
         m.pos.size(),
         m.con.size(),
         [&m](std::size_t i) { return m.con[i]; },
-        [nv](std::size_t i) { return static_cast<Index>(i / nv); });
+        [&element_of](std::size_t i) { return element_of[i]; });
 }
 
 inline bool contains(std::span<const Index> element, Index v) {
     return std::find(element.begin(), element.end(), v) != element.end();
 }
 
-/// True if some element of `m` has both a and b as vertices, i.e. the edge.
-inline bool has_edge(const Mesh& m, const Csr& adj, Index a, Index b) {
-    for (Index e : adj.of(a))
-        if (contains(m.element(e), b))
+/// True if some element of `m` has every one of `nodes` as a vertex.
+inline bool has_all(const Mesh& m, const Csr& adj, std::span<const Index> nodes) {
+    for (Index e : adj.of(nodes[0])) {
+        const auto v = m.element(e);
+        if (std::all_of(nodes.begin() + 1, nodes.end(), [&v](Index n) { return contains(v, n); }))
             return true;
+    }
     return false;
 }
 
 inline void validate(const Mesh& m) {
     if (m.dim != 2 && m.dim != 3)
         throw std::invalid_argument("simplex: dim must be 2 or 3, got " + std::to_string(m.dim));
-    if (m.con.size() % static_cast<std::size_t>(m.vertices_per_element()) != 0)
-        throw std::invalid_argument("simplex: con size is not a multiple of dim + 1");
+    if (m.offset.size() != m.type.size() + 1 || m.offset.front() != 0 ||
+        static_cast<std::size_t>(m.offset.back()) != m.con.size())
+        throw std::invalid_argument("simplex: offset does not match type and con");
+    for (std::size_t e = 0; e < m.type.size(); ++e) {
+        const auto& t = element_type(m.type[e]);
+        if (t.dim != m.dim)
+            throw std::invalid_argument("simplex: element of another dimension");
+        if (m.offset[e + 1] - m.offset[e] != t.vertices)
+            throw std::invalid_argument("simplex: offset does not match the element's shape");
+    }
     const auto n = static_cast<Index>(m.pos.size());
     const auto in_range = [n](Index v) { return v >= 0 && v < n; };
     if (!std::all_of(m.con.begin(), m.con.end(), in_range))
         throw std::out_of_range("simplex: element vertex out of range");
-    for (const auto& h : m.hn)
-        if (!std::all_of(h.begin(), h.end(), in_range))
-            throw std::out_of_range("simplex: hanging-node row out of range");
-}
-
-inline Point midpoint(const Point& a, const Point& b) {
-    return {0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2])};
-}
-
-/// Mean-ratio quality 12 (3|V|)^(2/3) / sum(l^2): 1 for a regular tetrahedron.
-inline double tet_quality(const Point& a, const Point& b, const Point& c, const Point& d) {
-    const auto sub = [](const Point& p, const Point& q) {
-        return Point{p[0] - q[0], p[1] - q[1], p[2] - q[2]};
-    };
-    const auto dot = [](const Point& p, const Point& q) {
-        return p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
-    };
-    const Point u = sub(b, a), v = sub(c, a), w = sub(d, a);
-    const Point uxv{
-        u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
-    const double volume = dot(uxv, w) / 6.0;
-    const double sum_l2 = dot(u, u) + dot(v, v) + dot(w, w) + dot(sub(c, b), sub(c, b)) +
-                          dot(sub(d, b), sub(d, b)) + dot(sub(d, c), sub(d, c));
-    return 12.0 * std::pow(3.0 * std::abs(volume), 2.0 / 3.0) /
-           std::max(sum_l2, std::numeric_limits<double>::epsilon());
-}
-
-// Local numbering of a refined element, as the solver's MATLAB meshes number
-// it (mesh_subdivide_list, observed from its output): corners 0..dim, then
-// the edge midpoints in the order they are created. The correlation's
-// round-off depends on node and element order, so this numbering keeps every
-// downstream result bit for bit.
-// Triangle: 3 = m12, 4 = m02, 5 = m01.
-inline constexpr std::array<std::array<int, 2>, 3> kTriEdges{{{1, 2}, {0, 2}, {0, 1}}};
-inline constexpr std::array<std::array<int, 3>, 4> kTriChildren{
-    {{2, 4, 3}, {3, 5, 1}, {4, 0, 5}, {5, 3, 4}}};
-// Tetrahedron: 4 = m13, 5 = m03, 6 = m01, 7 = m23, 8 = m12, 9 = m02. Children:
-// one corner, the 4 octahedron children, then the other three corners.
-inline constexpr std::array<std::array<int, 2>, 6> kTetEdges{
-    {{1, 3}, {0, 3}, {0, 1}, {2, 3}, {1, 2}, {0, 2}}};
-inline constexpr std::array<int, 4> kTetFirstCorner{3, 7, 4, 5};
-inline constexpr std::array<std::array<int, 4>, 3> kTetLastCorners{
-    {{4, 8, 1, 6}, {5, 9, 6, 0}, {7, 2, 8, 9}}};
-// The octahedron's 4 children for each diagonal: m13-m02, m01-m23, m03-m12.
-inline constexpr std::array<std::array<std::array<int, 4>, 4>, 3> kOctahedron{{
-    {{{4, 6, 5, 9}, {4, 8, 6, 9}, {4, 7, 8, 9}, {4, 5, 7, 9}}},
-    {{{6, 7, 5, 4}, {6, 7, 9, 5}, {6, 7, 8, 9}, {6, 7, 4, 8}}},
-    {{{5, 8, 4, 6}, {5, 8, 6, 9}, {5, 8, 9, 7}, {5, 8, 7, 4}}},
-}};
-
-/// The octahedron split whose worst child quality is highest; first wins ties.
-inline const std::array<std::array<int, 4>, 4>& best_octahedron_split(
-    const std::array<Point, 10>& p) {
-    std::size_t best = 0;
-    double best_worst = -1.0;
-    for (std::size_t k = 0; k < kOctahedron.size(); ++k) {
-        double worst = std::numeric_limits<double>::infinity();
-        for (const auto& t : kOctahedron[k])
-            worst = std::min(worst,
-                             tet_quality(p[static_cast<std::size_t>(t[0])],
-                                         p[static_cast<std::size_t>(t[1])],
-                                         p[static_cast<std::size_t>(t[2])],
-                                         p[static_cast<std::size_t>(t[3])]));
-        if (worst > best_worst) {
-            best_worst = worst;
-            best = k;
-        }
+    for (const auto& h : m.hn) {
+        if (h.parent.empty() || h.parent.size() != h.weight.size())
+            throw std::invalid_argument("simplex: a constraint needs one weight per parent");
+        if (!in_range(h.node) || !std::all_of(h.parent.begin(), h.parent.end(), in_range))
+            throw std::out_of_range("simplex: constraint node out of range");
+        double sum = 0.0;
+        for (double w : h.weight)
+            sum += w;
+        if (!(std::abs(sum - 1.0) <= 1e-12))  // also rejects non-finite weights
+            throw std::invalid_argument("simplex: constraint weights must sum to 1");
     }
-    return kOctahedron[best];
+}
+
+/// Parents of a node, sorted, padded with -1: the key that makes neighbours
+/// share it.
+using NodeKey = std::array<Index, 8>;
+
+struct NodeKeyHash {
+    std::size_t operator()(const NodeKey& k) const {
+        std::uint64_t h = 1469598103934665603ULL;  // FNV-1a
+        for (Index v : k) {
+            h ^= static_cast<std::uint32_t>(v);
+            h *= 1099511628211ULL;
+        }
+        return static_cast<std::size_t>(h);
+    }
+};
+
+/// Sorts a row's parents ascending, carrying the weights along.
+inline void sort_row(Constraint& row) {
+    const std::size_t n = row.parent.size();
+    for (std::size_t i = 1; i < n; ++i)  // insertion sort: rows hold a few parents
+        for (std::size_t j = i; j > 0 && row.parent[j] < row.parent[j - 1]; --j) {
+            std::swap(row.parent[j], row.parent[j - 1]);
+            std::swap(row.weight[j], row.weight[j - 1]);
+        }
+}
+
+inline NodeKey key_of(const Constraint& sorted) {
+    if (sorted.parent.size() > NodeKey{}.size())
+        throw std::invalid_argument(
+            "simplex: a node has more parents than any element has vertices");
+    NodeKey k;
+    k.fill(-1);
+    std::copy(sorted.parent.begin(), sorted.parent.end(), k.begin());
+    return k;
 }
 
 }  // namespace detail
@@ -216,11 +222,12 @@ inline const std::array<std::array<int, 4>, 4>& best_octahedron_split(
  * @brief Closes a refinement list under 1-irregular balance.
  *
  * Refining an element that has a hanging node H as a vertex while an element
- * across H's parent edge stays coarse would hang a new node on H: a chained,
- * 2-irregular node that master-slave condensation rejects, and that refine()
- * cannot track. So every element with H's parent edge but not H is added,
- * transitively. The result is the least closed superset of `elements`, the
- * list MATLAB's mesh_balance_refine_list returns.
+ * with all of H's parents (the unrefined edge or face H sits on) stays coarse
+ * would hang a new node on H: a chained, 2-irregular node that master-slave
+ * condensation rejects, and that refine() cannot track. So every element
+ * with all of H's parents is added, transitively (none has H as well: it
+ * would be degenerate). The result is the least closed superset of
+ * `elements`, the list MATLAB's mesh_balance_refine_list returns.
  *
  * @return The closed list, ascending and without duplicates.
  */
@@ -254,18 +261,20 @@ inline std::vector<Index> detail::closure(const Mesh& mesh, std::span<const Inde
         const auto rows_of = detail::make_csr(
             mesh.pos.size(),
             mesh.hn.size(),
-            [&mesh](std::size_t i) { return mesh.hn[i][0]; },
+            [&mesh](std::size_t i) { return mesh.hn[i].node; },
             [](std::size_t i) { return static_cast<Index>(i); });
         while (!work.empty()) {
             const Index e = work.back();
             work.pop_back();
             for (Index h : mesh.element(e))
                 for (Index r : rows_of.of(h)) {
-                    const auto& row = mesh.hn[static_cast<std::size_t>(r)];
-                    for (Index f : adj.of(row[1])) {
+                    const auto& parent = mesh.hn[static_cast<std::size_t>(r)].parent;
+                    for (Index f : adj.of(parent[0])) {
                         const auto vf = mesh.element(f);
                         if (!selected[static_cast<std::size_t>(f)] &&
-                            detail::contains(vf, row[2]) && !detail::contains(vf, h)) {
+                            std::all_of(parent.begin() + 1, parent.end(), [&vf](Index p) {
+                                return detail::contains(vf, p);
+                            })) {
                             selected[static_cast<std::size_t>(f)] = 1;
                             work.push_back(f);
                         }
@@ -284,15 +293,17 @@ inline std::vector<Index> detail::closure(const Mesh& mesh, std::span<const Inde
 /**
  * @brief Red-refines the listed elements of `mesh`.
  *
- * @param mesh      T3/T4 mesh; `mesh.hn` lists its hanging nodes.
+ * @param mesh      Mesh of one dimension; `mesh.hn` lists its hanging nodes.
  * @param elements  Elements to refine (any order; duplicates are ignored),
- *   closed under balance_closure(). An unbalanced list can hang a node on
- *   a face; that node is not tracked and a later refinement duplicates it.
- * @return The refined mesh and its prolongation, numbered as the solver's
- *   MATLAB meshes were: old nodes keep their indices and new nodes follow in
- *   order of creation; the children of the refined elements come first,
- *   parent by parent in ascending order and in the order above, then the
- *   other elements in their order.
+ *   closed under balance_closure(). An unbalanced list can hang a node on a
+ *   hanging node; that node is not tracked and a later refinement
+ *   duplicates it.
+ * @return The refined mesh and its prolongation. Old nodes keep their
+ *   indices and new nodes follow in order of creation. The children of the
+ *   refined elements come first, parent by parent in ascending order and in
+ *   their template's order, then the other elements in their order. Hanging
+ *   nodes list the new ones first, then the old ones still hanging, with
+ *   parents ascending.
  */
 [[nodiscard]] inline Refinement refine(const Mesh& mesh, std::span<const Index> elements) {
     detail::validate(mesh);
@@ -308,84 +319,95 @@ inline Refinement detail::refine_valid(const Mesh& mesh, std::span<const Index> 
             throw std::out_of_range("simplex: element index out of range");
         marked[static_cast<std::size_t>(e)] = 1;
     }
-    const auto n_marked =
-        static_cast<std::size_t>(std::count(marked.begin(), marked.end(), char{1}));
-    const std::size_t n_children = mesh.dim == 2 ? 4 : 8;
 
     Refinement out;
     Mesh& m = out.mesh;
     m.dim = mesh.dim;
     m.pos = mesh.pos;
-    m.con.reserve(mesh.con.size() + n_marked * (n_children - 1) *
-                                        static_cast<std::size_t>(mesh.vertices_per_element()));
+    std::size_t n_children = 0, n_new = 0;
+    for (Index e = 0; e < n_elem; ++e)
+        if (marked[static_cast<std::size_t>(e)]) {
+            const auto& red = element_type(mesh.type[static_cast<std::size_t>(e)]).red;
+            n_children += red.children();
+            n_new += red.new_nodes.size();
+        }
+    m.type.reserve(mesh.type.size() + n_children);
+    m.offset.reserve(mesh.offset.size() + n_children);
+    m.con.reserve(mesh.con.size() + n_children * 8);
 
-    std::unordered_map<std::uint64_t, Index> midpoint_of_edge;
-    midpoint_of_edge.reserve(mesh.hn.size() + n_marked * (mesh.dim == 2 ? 3 : 6));
-    for (const auto& h : mesh.hn)
-        midpoint_of_edge.emplace(detail::edge_key(h[1], h[2]), h[0]);
-    const auto midpoint_node = [&](Index a, Index b) {
+    std::unordered_map<detail::NodeKey, Index, detail::NodeKeyHash> node_of;
+    node_of.reserve(mesh.hn.size() + n_new);
+    for (const auto& h : mesh.hn) {
+        Constraint row = h;
+        detail::sort_row(row);
+        node_of.emplace(detail::key_of(row), h.node);
+    }
+    Constraint row;
+    const auto new_node = [&](const LatticeNode& lattice, std::span<const Index> v) {
+        row.parent.clear();
+        row.weight = lattice.weight;
+        for (int i : lattice.vertex)
+            row.parent.push_back(v[static_cast<std::size_t>(i)]);
+        detail::sort_row(row);
         const auto [it, created] =
-            midpoint_of_edge.try_emplace(detail::edge_key(a, b), static_cast<Index>(m.pos.size()));
+            node_of.try_emplace(detail::key_of(row), static_cast<Index>(m.pos.size()));
         if (created) {
             if (m.pos.size() >= static_cast<std::size_t>(std::numeric_limits<Index>::max()))
                 throw std::overflow_error("simplex: node count exceeds the index type");
-            const Point p = detail::midpoint(m.pos[static_cast<std::size_t>(a)],
-                                             m.pos[static_cast<std::size_t>(b)]);
+            const auto x = [&m](Index n) { return m.pos[static_cast<std::size_t>(n)]; };
+            Point p = x(row.parent[0]);
+            for (auto& c : p)
+                c *= row.weight[0];
+            for (std::size_t k = 1; k < row.parent.size(); ++k)
+                for (std::size_t c = 0; c < 3; ++c)
+                    p[c] += row.weight[k] * x(row.parent[k])[c];
             m.pos.push_back(p);
-            out.parents.push_back({std::min(a, b), std::max(a, b)});
+            row.node = it->second;
+            out.prolongation.push_back(row);
         }
         return it->second;
     };
-    const auto emit = [&m](const auto& local, const auto& child) {
-        for (int i : child)
-            m.con.push_back(local[static_cast<std::size_t>(i)]);
-    };
 
+    std::vector<Index> local, child;
+    std::vector<Point> at;
     for (Index e = 0; e < n_elem; ++e) {
         if (!marked[static_cast<std::size_t>(e)])
             continue;
         const auto v = mesh.element(e);
-        if (mesh.dim == 2) {
-            std::array<Index, 6> local{v[0], v[1], v[2]};
-            for (std::size_t i = 0; i < detail::kTriEdges.size(); ++i)
-                local[3 + i] = midpoint_node(v[static_cast<std::size_t>(detail::kTriEdges[i][0])],
-                                             v[static_cast<std::size_t>(detail::kTriEdges[i][1])]);
-            for (const auto& child : detail::kTriChildren)
-                emit(local, child);
-        } else {
-            std::array<Index, 10> local{v[0], v[1], v[2], v[3]};
-            for (std::size_t i = 0; i < detail::kTetEdges.size(); ++i)
-                local[4 + i] = midpoint_node(v[static_cast<std::size_t>(detail::kTetEdges[i][0])],
-                                             v[static_cast<std::size_t>(detail::kTetEdges[i][1])]);
-            std::array<Point, 10> p;
-            for (std::size_t i = 0; i < p.size(); ++i)
-                p[i] = m.pos[static_cast<std::size_t>(local[i])];
-            emit(local, detail::kTetFirstCorner);
-            for (const auto& child : detail::best_octahedron_split(p))
-                emit(local, child);
-            for (const auto& child : detail::kTetLastCorners)
-                emit(local, child);
+        const auto& red = element_type(mesh.type[static_cast<std::size_t>(e)]).red;
+        local.assign(v.begin(), v.end());
+        for (const auto& lattice : red.new_nodes)
+            local.push_back(new_node(lattice, v));
+        std::size_t choice = 0;
+        if (red.choices.size() > 1) {
+            at.clear();
+            for (Index n : local)
+                at.push_back(m.pos[static_cast<std::size_t>(n)]);
+            choice = split_choice(red, at);
         }
+        for (const auto* part : {&red.head, &red.choices[choice], &red.tail})
+            for (const auto& c : *part) {
+                child.clear();
+                for (int n : c.node)
+                    child.push_back(local[static_cast<std::size_t>(n)]);
+                m.add(c.shape, child);
+            }
     }
     for (Index e = 0; e < n_elem; ++e)
-        if (!marked[static_cast<std::size_t>(e)]) {
-            const auto v = mesh.element(e);
-            m.con.insert(m.con.end(), v.begin(), v.end());
-        }
+        if (!marked[static_cast<std::size_t>(e)])
+            m.add(mesh.type[static_cast<std::size_t>(e)], mesh.element(e));
 
-    // A midpoint hangs while some element still has its parent edge.
-    const auto n_old = static_cast<Index>(mesh.pos.size());
-    std::vector<std::array<Index, 3>> rows;
-    rows.reserve(out.parents.size() + mesh.hn.size());
-    for (std::size_t k = 0; k < out.parents.size(); ++k)
-        rows.push_back({n_old + static_cast<Index>(k), out.parents[k][0], out.parents[k][1]});
-    for (const auto& h : mesh.hn)
-        rows.push_back({h[0], std::min(h[1], h[2]), std::max(h[1], h[2])});
-
+    // A node hangs while some element still has all of its parents.
     const auto adj = detail::node_elements(m);
-    for (const auto& r : rows)
-        if (detail::has_edge(m, adj, r[1], r[2]))
+    for (const auto& r : out.prolongation)
+        if (detail::has_all(m, adj, r.parent))
             m.hn.push_back(r);
+    for (const auto& h : mesh.hn) {
+        Constraint old = h;
+        detail::sort_row(old);
+        if (detail::has_all(m, adj, old.parent))
+            m.hn.push_back(std::move(old));
+    }
     return out;
 }
 

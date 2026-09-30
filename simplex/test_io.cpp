@@ -36,8 +36,11 @@ void patch(const std::filesystem::path& path, std::streamoff offset, const std::
 
 TEST_CASE("SMX2 round-trips a mesh and its fields", "[simplex][io]") {
     const int dim = GENERATE(2, 3);
+    const bool hybrid = GENERATE(false, true);
     std::mt19937 rng(41);
-    const Mesh m = randomly_refined(grid(dim, 2, 0.2, rng), 2, 0.3, rng);
+    const Mesh seed =
+        hybrid ? (dim == 2 ? hybrid_2d(3, rng) : hybrid_3d(2, rng)) : grid(dim, 2, 0.2, rng);
+    const Mesh m = randomly_refined(seed, 2, 0.3, rng);
     REQUIRE(!m.hn.empty());
     const std::map<std::string, std::vector<Index>> ints{{"elements", {3, 1, 4, 1, 5}},
                                                          {"empty", {}}};
@@ -49,6 +52,8 @@ TEST_CASE("SMX2 round-trips a mesh and its fields", "[simplex][io]") {
     std::filesystem::remove(path);
     CHECK(p.mesh.dim == m.dim);
     CHECK(p.mesh.pos == m.pos);
+    CHECK(p.mesh.type == m.type);
+    CHECK(p.mesh.offset == m.offset);
     CHECK(p.mesh.con == m.con);
     CHECK(p.mesh.hn == m.hn);
     CHECK(p.ints == ints);
@@ -68,7 +73,7 @@ TEST_CASE("SMX2 carries an empty mesh with fields", "[simplex][io]") {
     CHECK(p.ints.at("nodes") == std::vector<Index>{4, 4, 4});
 }
 
-TEST_CASE("SMX2 rejects foreign, truncated, padded and unsupported files", "[simplex][io]") {
+TEST_CASE("SMX2 rejects foreign, truncated, padded and inconsistent files", "[simplex][io]") {
     std::mt19937 rng(43);
     const Mesh m = randomly_refined(grid(2, 2, 0.0, rng), 1, 0.3, rng);
     REQUIRE(!m.hn.empty());
@@ -76,9 +81,9 @@ TEST_CASE("SMX2 rejects foreign, truncated, padded and unsupported files", "[sim
     const auto fresh = [&] { io::write(path.string(), m, {{"elements", {0}}}); };
     // Offsets: magic 4, dim 4, five counts 40, then pos, types, con, constraints.
     const std::streamoff types = 4 + 4 + 40 + static_cast<std::streamoff>(m.pos.size() * 24);
-    const std::streamoff weights = types + m.num_elements() +
-                                   static_cast<std::streamoff>(m.con.size() * 4) +
-                                   static_cast<std::streamoff>(m.hn.size() * 4 * 4);
+    const std::streamoff counts = types + m.num_elements() +
+                                  static_cast<std::streamoff>(m.con.size() * 4) +
+                                  static_cast<std::streamoff>(m.hn.size() * 4);
 
     fresh();
     std::filesystem::resize_file(path, std::filesystem::file_size(path) - 1);
@@ -92,14 +97,17 @@ TEST_CASE("SMX2 rejects foreign, truncated, padded and unsupported files", "[sim
     patch(path, 0, "X");
     CHECK_THROWS_AS(io::read(path.string()), std::runtime_error);  // magic
 
-    fresh();
-    patch(path, types, std::string(1, '\1'));  // a Q4 code
-    CHECK_THROWS_AS(io::read(path.string()), std::runtime_error);
+    for (const char code : {'\2', '\4'}) {  // unknown, and a 3D shape in a 2D file
+        fresh();
+        patch(path, types, std::string(1, code));
+        CHECK_THROWS_AS(io::read(path.string()), std::runtime_error);
+    }
 
-    fresh();
-    const double third = 1.0 / 3.0;
-    patch(path, weights, std::string(reinterpret_cast<const char*>(&third), sizeof third));
-    CHECK_THROWS_AS(io::read(path.string()), std::runtime_error);  // not a midpoint
+    for (const Index count : {0, 3}) {  // a row without parents, rows overrunning the parents
+        fresh();
+        patch(path, counts, std::string(reinterpret_cast<const char*>(&count), sizeof count));
+        CHECK_THROWS_AS(io::read(path.string()), std::runtime_error);
+    }
 
     fresh();
     const std::uint64_t huge = std::uint64_t{1} << 40;
