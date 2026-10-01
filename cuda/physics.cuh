@@ -64,10 +64,8 @@ struct CircleOracle {
 
         double upper = r_dbl + threshold;
         double lower = r_dbl - threshold;
-        if (lower < 0.0)
-            lower = 0.0;
-
-        return (dist_sq < upper * upper && dist_sq > lower * lower);
+        return dist_sq < upper * upper &&
+               (lower <= 0.0 || dist_sq > lower * lower);  // inner test only when lower > 0
     }
 };
 
@@ -114,10 +112,8 @@ struct SphereOracle {
 
         double upper = r_dbl + threshold;
         double lower = r_dbl - threshold;
-        if (lower < 0.0)
-            lower = 0.0;
-
-        return (dist_sq < upper * upper && dist_sq > lower * lower);
+        return dist_sq < upper * upper &&
+               (lower <= 0.0 || dist_sq > lower * lower);  // inner test only when lower > 0
     }
 };
 

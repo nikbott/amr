@@ -840,7 +840,39 @@ TEST_CASE("ScalarFieldOracle Dörfler marking + coarsening (oracle #11)", "[orac
         REQUIRE_THROWS_AS(
             ScalarFieldOracle<2>(codes, levels, err, 0.5, 0.0, /*coarse*/ 4, /*fine*/ 2),
             std::invalid_argument);  // coarse_level > fine_level
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        REQUIRE_THROWS_AS(ScalarFieldOracle<2>(codes, levels, err, nan, 0.0, 0, max_lvl),
+                          std::invalid_argument);  // NaN theta
+        REQUIRE_THROWS_AS(ScalarFieldOracle<2>(codes, levels, err, 0.5, nan, 0, max_lvl),
+                          std::invalid_argument);
     }
+
+    SECTION("the coarsen band stops before the element that crosses theta") {
+        // error = {100,1,1,1}, theta_c = 0.1: total sq 10003, 10% = 1000.3. The low
+        // tail 1,1,1 stays within it; adding the 100 crosses it. So the cutoff is 1
+        // and the family holding the 100, which the refine band marks, is kept.
+        std::vector<double> err{100, 1, 1, 1};
+        ScalarFieldOracle<2> oracle(codes, levels, err, 0.3, 0.1, 0, max_lvl);
+        int refined = 0;
+        for (const auto& n : tree)
+            refined += oracle(n, max_lvl);
+        REQUIRE(refined == 1);
+        REQUIRE_FALSE(tree.coarsen(oracle.coarsener()));
+        REQUIRE(tree.size() == 4);
+    }
+}
+
+TEST_CASE("Band oracles refine a cell that contains the centre", "[oracle]") {
+    // Once the band's inner radius reaches below zero every cell near the
+    // centre meets the band; the root holds the centre at distance 0.
+    Config cfg;
+    cfg.coarse_level = 0;
+    cfg.fine_level = 6;
+    cfg.max_level = 10;
+    CircleOracle circle(cfg);
+    SphereOracle sphere(cfg);
+    REQUIRE(circle(Node{MortonCode{0}, 0}, cfg.max_level));
+    REQUIRE(sphere(Node{MortonCode{0}, 0}, cfg.max_level));
 }
 
 TEST_CASE("ScalarFieldOracle marks a minimum-size set covering theta", "[oracle][dorfler]") {
