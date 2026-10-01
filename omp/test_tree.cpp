@@ -7,7 +7,6 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <random>
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -26,10 +25,13 @@ TEMPLATE_TEST_CASE("Linear Tree Invariants (Burstedde §2.2)", "[tree]", Quadtre
     SECTION("Completeness & Partition of Unity") {
         int max_lvl = 5;
         TestType tree(max_lvl);
-        std::mt19937 rng(123);
-
-        // Create a non-uniform random mesh
-        tree.refine([&](const Node& n, int) { return (n.level < 4 && (rng() % 3 == 0)); });
+        // Create a non-uniform mesh. The predicate is a hash of the cell, not a
+        // shared generator: refine() calls it from many threads at once.
+        tree.refine([&](const Node& n, int) {
+            return n.level < 4 &&
+                   ((n.code.value ^ (uint64_t(n.level) << 58)) * 0x9e3779b97f4a7c15ULL >> 40) % 3 ==
+                       0;
+        });
 
         // 1. Sortedness
         REQUIRE(std::is_sorted(tree.begin(), tree.end()));
