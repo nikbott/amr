@@ -15,6 +15,7 @@
 #include <map>
 #include <random>
 #include <set>
+#include <span>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -139,6 +140,52 @@ TEST_CASE("adapt reports the stop statuses and refines nothing then", "[adapt]")
     p.marking.max_elements = static_cast<double>(n);
     CHECK(adapt(m, error, ratio, p).status == AdaptStatus::element_ceiling);
     CHECK_THROWS_AS(adapt(m, std::vector<double>(n - 1, 1.0), ratio, p), std::invalid_argument);
+}
+
+TEST_CASE("The element ceiling bounds the balanced refinement", "[adapt]") {
+    // The marking budgets the selected elements only; balance can add more.
+    // adapt must keep the longest prefix of the selection whose closure fits.
+    const int dim = GENERATE(2, 3);
+    std::mt19937 rng(static_cast<unsigned>(83 + dim));
+    const Mesh m = randomly_refined(grid(dim, dim == 2 ? 6 : 3, 0.2, rng), 2, 0.3, rng);
+    REQUIRE_FALSE(m.hn.empty());
+    const Index n = m.num_elements();
+    const std::vector<Index> growth(static_cast<std::size_t>(n), dim == 2 ? 3 : 7);
+    const auto refined_size = [&m](std::span<const Index> selected) {
+        return refine(m, balance_closure(m, selected)).mesh.num_elements();
+    };
+    int cut_by_balance = 0;
+    for (int trial = 0; trial < 40; ++trial) {
+        std::vector<double> error, ratio;
+        random_indicators(n, 0.3, rng, error, ratio);
+        AdaptParams p;
+        p.marking.theta = 0.7;
+        const auto full = adapt(m, error, ratio, p);
+        REQUIRE(full.status == AdaptStatus::refined);
+        const Index full_size = full.refinement.mesh.num_elements();
+        std::uniform_real_distribution<double> at(0.1, 0.9);
+        p.marking.max_elements = std::floor(n + at(rng) * (full_size - n));
+
+        const auto a = adapt(m, error, ratio, p);
+        const auto& sel = a.marking.selected;
+        // The selection is a prefix of the unbounded one, and the next element
+        // of that one would not fit once balanced.
+        REQUIRE(sel.size() < full.marking.selected.size());
+        CHECK(std::equal(sel.begin(), sel.end(), full.marking.selected.begin()));
+        CHECK(refined_size(std::span(full.marking.selected.data(), sel.size() + 1)) >
+              p.marking.max_elements);
+        if (a.status == AdaptStatus::element_ceiling) {
+            CHECK(sel.empty());
+            CHECK(a.balanced.empty());
+            continue;
+        }
+        REQUIRE(a.status == AdaptStatus::refined);
+        CHECK(a.refinement.mesh.num_elements() <= p.marking.max_elements);
+        CHECK(a.balanced == balance_closure(m, sel));
+        const auto budget_only = amr::marking::mark(error, ratio, {}, growth, p.marking);
+        cut_by_balance += budget_only.selected.size() > sel.size();
+    }
+    CHECK(cut_by_balance > 0);  // the balance-aware cut was exercised
 }
 
 TEST_CASE("Structured seeds are conforming, oriented simplicial boxes", "[structured]") {
