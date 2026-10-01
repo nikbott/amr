@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <random>
 #include <vector>
@@ -20,6 +21,8 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <mpi.h>
 
 #include "core.hpp"
@@ -457,8 +460,37 @@ TEST_CASE("Safety & Edge Cases", "[safety]") {
     }
 }
 
+// A failed assertion on one rank ends that rank's section, while the others
+// go on into the section's next collective and wait for it forever. Abort the
+// whole job instead, after saying where.
+class AbortOnFailure : public Catch::EventListenerBase {
+public:
+    using Catch::EventListenerBase::EventListenerBase;
+    void assertionEnded(const Catch::AssertionStats& stats) override {
+        if (stats.assertionResult.isOk())
+            return;
+        int rank = 0;
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        const auto& at = stats.assertionResult.getSourceInfo();
+        std::fprintf(stderr,
+                     "rank %d: %s failed at %s:%zu\n",
+                     rank,
+                     stats.assertionResult.getExpressionInMacro().c_str(),
+                     at.file,
+                     at.line);
+        std::fflush(stderr);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+};
+CATCH_REGISTER_LISTENER(AbortOnFailure)
+
 int main(int argc, char* argv[]) {
-    MPI_Init(&argc, &argv);
+    int provided = 0;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);  // as mpi::Context asks
+    if (provided < MPI_THREAD_FUNNELED) {
+        std::fprintf(stderr, "MPI does not provide MPI_THREAD_FUNNELED\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
     int result = Catch::Session().run(argc, argv);
     MPI_Finalize();
     return result;
