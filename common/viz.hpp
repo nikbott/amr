@@ -18,7 +18,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -57,6 +59,9 @@ inline std::ofstream open_or_throw(const std::string& path, const char* who) {
     std::ofstream f(path);
     if (!f)
         throw std::runtime_error(std::string(who) + ": cannot open " + path);
+    // Round-trip precision: at the default 6 digits, adjacent cells from level
+    // 20 on print the same corner (a zero-width cell next to a double one).
+    f << std::setprecision(std::numeric_limits<double>::max_digits10);
     return f;
 }
 
