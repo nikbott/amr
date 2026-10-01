@@ -27,6 +27,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "element.hpp"
+#include "simplex.hpp"
+#include "structured.hpp"
 
 using namespace amr::simplex;
 using Catch::Matchers::WithinAbs;
@@ -462,8 +464,42 @@ TEST_CASE("The split choice takes the best worst child", "[element]") {
             return w;
         };
         for (std::size_t k = 0; k < t.red.choices.size(); ++k)
-            CHECK(worst(chosen) >= worst(k));
+            CHECK(worst(chosen) * (1.0 + kSplitTieTolerance) >= worst(k));
     }
+}
+
+TEST_CASE("Tied splits go to the earliest choice, whatever the round-off", "[element]") {
+    // A structured seed of cube cells with inexact coordinates (512/3
+    // spacing): a third of its tetrahedra tie in exact arithmetic, and
+    // round-off used to give 24 of these 54 ties to a later split. The
+    // earliest choice within the tie tolerance must win.
+    const Mesh m = structured(std::vector<double>{512, 512, 512},
+                              std::vector<Index>{4, 4, 4},
+                              std::vector<double>{0, 0, 0});
+    const auto& t = element_type(Shape::T4);
+    int ties = 0;
+    for (Index e = 0; e < m.num_elements(); ++e) {
+        std::vector<Point> v;
+        for (Index n : m.element(e))
+            v.push_back(m.pos[static_cast<std::size_t>(n)]);
+        const auto local = local_nodes(t, v);
+        std::vector<double> w;
+        for (const auto& choice : t.red.choices) {
+            double worst = 1e300;
+            for (const auto& c : choice)
+                worst = std::min(worst, simplex_quality(Shape::T4, positions(local, c.node)));
+            w.push_back(worst);
+        }
+        const double best = *std::max_element(w.begin(), w.end());
+        std::size_t earliest = 0;
+        while (w[earliest] * (1.0 + kSplitTieTolerance) < best)
+            ++earliest;
+        ties += std::count_if(w.begin(), w.end(), [&](double x) {
+                    return x * (1.0 + kSplitTieTolerance) >= best;
+                }) > 1;
+        CHECK(split_choice(t.red, local) == earliest);
+    }
+    CHECK(ties == 54);  // the fixture has ties to decide
 }
 
 TEST_CASE("Edges and faces are those of the convex reference element", "[element]") {
