@@ -141,12 +141,19 @@ HOST_DEVICE uint64_t get_neighbor_code(uint64_t code, int level, int max_level, 
 // --- Refinement Kernels ---
 
 template <typename Oracle>
-__global__ void k_mark_refine(
-    const uint64_t* codes, const uint8_t* levels, int n, int* counts, Oracle oracle, int dim) {
+__global__ void k_mark_refine(const uint64_t* codes,
+                              const uint8_t* levels,
+                              int n,
+                              int* counts,
+                              Oracle oracle,
+                              int dim,
+                              int max_level) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n)
         return;
-    if (oracle(MortonCode{codes[idx]}, levels[idx]))
+    // A leaf at max_level has no children to make, whatever the oracle says
+    // (as in the omp and mpi backends).
+    if (levels[idx] < max_level && oracle(MortonCode{codes[idx]}, levels[idx]))
         counts[idx] = (1 << dim);
     else
         counts[idx] = 1;
@@ -596,7 +603,8 @@ public:
                                        n,
                                        thrust::raw_pointer_cast(aux_counts.data()),
                                        oracle,
-                                       DIM);
+                                       DIM,
+                                       max_level);
         CHECK_CUDA(cudaDeviceSynchronize());
 
         thrust::exclusive_scan(aux_counts.begin(), aux_counts.end(), aux_offsets.begin());

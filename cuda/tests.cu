@@ -289,6 +289,29 @@ void run_test_invariants() {
     std::cout << "PASSED\n";
 }
 
+struct AlwaysRefineOracle {
+    HOST_DEVICE bool operator()(MortonCode, int) const { return true; }
+};
+
+template <int DIM>
+void run_test_refine_stops_at_max_level() {
+    // An oracle that never says stop: refinement must end at max_level with
+    // the uniform tree, not split max_level leaves into duplicate codes.
+    std::cout << "[Test] Refine stops at max_level " << DIM << "D... ";
+    const int max_level = 3;
+    LinearTree<DIM> tree(max_level);
+    int passes = 0;
+    while (tree.refine(AlwaysRefineOracle{}) && passes < 10)
+        ++passes;
+    CHECK(passes == max_level);
+    CHECK(tree.size() == (1ULL << (DIM * max_level)));
+    thrust::host_vector<uint8_t> h_lvl = tree.levels;
+    for (uint8_t l : h_lvl)
+        CHECK(l == max_level);
+    tree.verify();
+    std::cout << "PASSED\n";
+}
+
 template <int DIM>
 void run_test_geometric_coarsening() {
     std::cout << "[Test] Geometric Coarsening " << DIM << "D... ";
@@ -478,6 +501,9 @@ int main() {
 
     run_test_invariants<2>();
     run_test_invariants<3>();
+
+    run_test_refine_stops_at_max_level<2>();
+    run_test_refine_stops_at_max_level<3>();
 
     run_test_geometric_coarsening<2>();
     run_test_geometric_coarsening<3>();
