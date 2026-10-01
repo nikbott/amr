@@ -217,6 +217,15 @@ if(AMR_BUILD_MPI)
       COMMAND
         ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 4 ${MPIEXEC_PREFLAGS}
         $<TARGET_FILE:amr_mpi_tests> ${MPIEXEC_POSTFLAGS})
+    # An odd rank count, and more ranks than the balance fixtures have leaves,
+    # so some ranks own none (oversubscribed: one thread per rank).
+    add_test(
+      NAME MpiTests5
+      COMMAND
+        ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 5 ${MPIEXEC_PREFLAGS}
+        $<TARGET_FILE:amr_mpi_tests> ${MPIEXEC_POSTFLAGS})
+    set_tests_properties(MpiTests MpiTests5 PROPERTIES TIMEOUT 600 ENVIRONMENT
+                                                       "OMP_NUM_THREADS=1")
   endif()
 endif()
 
