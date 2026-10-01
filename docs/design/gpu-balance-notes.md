@@ -9,7 +9,8 @@ keys resolve in [`REFERENCES.md`](../REFERENCES.md).
 We store a linear (sorted) Morton octree: leaves are axis-aligned cells encoded
 as 64-bit Morton codes in a sorted array with a per-leaf level (p4est/t8code
 style, [BurstWG2011]). The expensive operation is **2:1 balance**: enforce that
-face-neighbouring leaves differ by at most one level. Our application (DIC for
+face-neighbouring leaves (and, in 3D, edge-neighbouring ones) differ by at most
+one level. Our application (DIC for
 fracture) produces *thin, deeply refined crack features in coarse domains*,
 i.e. **deep ripple fronts over large meshes** — the adversarial regime for any
 balancer.
@@ -19,7 +20,7 @@ balancer.
 There are three paradigms, in increasing sophistication:
 
 1. **Ripple** ([SSB2008] §I; what `cuda/tree.cuh::balance_ref` does). Mark every
-   leaf whose face-neighbour is >1 level coarser, split the coarse violator one
+   leaf whose face (or, in 3D, edge) neighbour is >1 level coarser, split the coarse violator one
    level, repeat until no violations. Correct and simple, but *"splitting one
    octant can force a non-adjacent octant to split"* ([SSB2008], the *ripple
    effect*), so it is inherently iterative and each pass re-scans O(N).
@@ -56,8 +57,11 @@ There are three paradigms, in increasing sophistication:
   `parent(o)`. *"each l-octant ... attempt[s] to add to the octree its family
   and the (l+1)-octants that neighbor its parent ... the coarse neighborhood N"*.
   Which neighbours (face / edge / corner) depends on the balance condition
-  ([IBG2012] Fig. 5). **Our `balance_ref`/`balance` enforce *face* balance**, so
-  `N(o)` = the 2·d face-neighbours of `parent(o)` at the parent's level.
+  ([IBG2012] Fig. 5). **Our `balance_ref`/`balance` enforce face balance in 2D
+  and face + edge balance in 3D** (`cuda/tree.cuh`: 4 directions in 2D, 6 face +
+  12 edge in 3D; README's invariant), so `N(o)` = the 4 face-neighbours of
+  `parent(o)` in 2D, the 18 face- and edge-neighbours in 3D, at the parent's
+  level.
 - **Preclusion `r ≺ o`** ("o precludes r"): *"if and only if parent(r) is
   ancestor (or equal) to parent(o)."* Equivalence classes are families;
   precluded octants are redundant and removed, then recovered by completion.
@@ -121,7 +125,7 @@ right target for a GPU port:
 | Step | Primitive |
 |---|---|
 | `Reduce(S)` | `transform` (→ 0-sibling) + `unique`/segmented compaction on sorted codes |
-| generate `N(o)` 0-siblings | one kernel, ≤ 2·d outputs/leaf → `copy_if` |
+| generate `N(o)` 0-siblings | one kernel, ≤ 4 (2D) or 18 (3D) outputs/leaf → `copy_if` |
 | dedup vs `R ∪ R_new` | `sort` + `unique`, or a device hash set |
 | preclusion test `∃ t ∈ R: t ≺ s` | single `lower_bound` (binary search) per candidate |
 | `Linearize` / `Complete` | segmented scan over sorted codes (drop ancestors / fill gaps) |
@@ -134,7 +138,7 @@ each rank with a **single** insulation-layer exchange round (vs ripple's many).
 ## Roadmap for this repo
 
 1. **Now:** `balance` (active-front) is production; `balance_ref` is the parity
-   oracle. Both face-balance, byte-identical, benchmarked
+   oracle. Both enforce the same 2:1 condition, byte-identical, benchmarked
    (`benchmarks/results/cuda_balance_active_front_*.csv`).
 2. **Next:** implement `balance_preclusion` (Fig. 7) in CUDA, **cross-validated
    byte-identical** against `balance_ref` on every fixture before it can become
