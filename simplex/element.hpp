@@ -16,8 +16,8 @@
  *
  * A d-simplex with d >= 3 has several Freudenthal subdivisions, one per vertex
  * ordering (a tetrahedron's 3 octahedron diagonals). split_choice() picks the
- * one whose worst child has the highest mean-ratio quality [Zhang1995]; ties
- * go to the earliest candidate.
+ * one whose worst child has the highest mean-ratio quality [Zhang1995]; ties,
+ * within a relative 1e-9 (kSplitTieTolerance), go to the earliest candidate.
  *
  * The pyramid is not a product of simplices. Its red refinement, 6 pyramids
  * (at the base corners, the apex and the centre, inverted) and 4 tetrahedra,
@@ -588,9 +588,16 @@ inline double simplex_quality(Shape s, std::span<const Point> x) {
     return 12.0 * std::pow(3.0 * m, 2.0 / 3.0) / sum_l2;
 }
 
-/// The choice of `red` whose worst child is best (earliest on ties), given
-/// the positions of the parent's vertices and new nodes, in local order.
-/// Choices consist of simplices.
+/// Worst-child qualities closer than this (relative) are a tie, which goes to
+/// the earliest choice. Round-off cannot tell them apart, so an exact
+/// comparison would let the compiler's floating-point contraction or the libm
+/// decide them; the solver's tetrahedra differ by at least 0.42% when they
+/// differ at all.
+inline constexpr double kSplitTieTolerance = 1e-9;
+
+/// The choice of `red` whose worst child is best (earliest on ties, see
+/// kSplitTieTolerance), given the positions of the parent's vertices and new
+/// nodes, in local order. Choices consist of simplices.
 inline std::size_t split_choice(const RedTemplate& red, std::span<const Point> local) {
     if (red.choices.size() < 2)
         return 0;
@@ -610,7 +617,7 @@ inline std::size_t split_choice(const RedTemplate& red, std::span<const Point> l
             }
             worst = std::min(worst, simplex_quality(c.shape, std::span(x.data(), c.node.size())));
         }
-        if (worst > best_worst) {
+        if (worst > best_worst * (1.0 + kSplitTieTolerance)) {
             best_worst = worst;
             best = k;
         }
