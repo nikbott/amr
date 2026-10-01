@@ -4,9 +4,12 @@
  *
  * @details `adapt` takes the estimator's per-element output (error e_i and
  * refinement ratio) and applies the solver's rules (common/marking.hpp): the
- * selected elements are closed under 1-irregular balance and red-refined. A
- * refinement that grows the mesh by less than `min_growth_fraction` is
- * reported as stagnated: the caller correlates that mesh once more and stops.
+ * selected elements are closed under 1-irregular balance and red-refined. The
+ * element ceiling bounds the refined mesh, balance included: when the closure
+ * of the selection would exceed it, the selection is cut to its longest prefix
+ * whose closure fits. A refinement that grows the mesh by less than
+ * `min_growth_fraction` is reported as stagnated: the caller correlates that
+ * mesh once more and stops.
  *
  * Element length is V^(1/d), the convention of the solver's size floor, its
  * local regularization and the MCOD estimator. It is the same for every
@@ -118,6 +121,39 @@ struct Adaptation {
     }
     t0 = Clock::now();
     a.balanced = detail::closure(mesh, a.marking.selected);
+    // The marking budgeted the selected elements only; balance can add more.
+    // A prefix's closure grows with the prefix, so the longest prefix that
+    // fits is found by bisection.
+    const auto added = [&growth](std::span<const Index> list) {
+        double sum = 0.0;
+        for (Index e : list)
+            sum += growth[static_cast<std::size_t>(e)];
+        return sum;
+    };
+    const double budget = p.marking.max_elements - static_cast<double>(n);
+    if (p.marking.max_elements > 0.0 && added(a.balanced) > budget) {
+        auto& selected = a.marking.selected;
+        std::size_t fits = 0, exceeds = selected.size();
+        std::vector<Index> closed;
+        while (exceeds - fits > 1) {
+            const std::size_t k = (fits + exceeds) / 2;
+            auto c = detail::closure(mesh, std::span(selected.data(), k));
+            if (added(c) <= budget) {
+                fits = k;
+                closed = std::move(c);
+            } else {
+                exceeds = k;
+            }
+        }
+        selected.resize(fits);
+        a.balanced = std::move(closed);
+        if (fits == 0) {
+            a.marking.status = marking::Status::element_ceiling;
+            a.status = AdaptStatus::element_ceiling;
+            a.seconds[1] = since(t0);
+            return a;
+        }
+    }
     a.seconds[1] = since(t0);
     t0 = Clock::now();
     a.refinement = detail::refine_valid(mesh, a.balanced);

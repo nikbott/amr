@@ -18,6 +18,9 @@
  *     elements (a per-cycle safety cap), then to as many as keep the refined
  *     mesh at or below `max_elements` given each element's growth when
  *     refined (children - 1). If not even one fits, the ceiling is reached.
+ *     This budget counts the selected elements only; the balance that
+ *     simplex::adapt applies next can add more, and adapt cuts the selection
+ *     further so that the balanced refinement fits.
  *
  * The arithmetic follows the MATLAB solver it replaces: the total is summed
  * in index order, the prefix sums are accumulated in sorted order and each is
