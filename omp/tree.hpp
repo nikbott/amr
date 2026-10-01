@@ -516,6 +516,7 @@ public:
                     if (it != leaf_codes.end() && *it == target_code) {
                         size_t idx = std::distance(leaf_codes.begin(), it);
                         if (leaf_levels[idx] <= search_lvl) {
+#pragma omp atomic write
                             wksp_flags[idx] = 1;
                             violation = true;
                         }
@@ -527,6 +528,7 @@ public:
                         uint64_t size = 1ULL << (DIM * (max_level - prev_lvl));
                         if (prev_code <= target_code && (prev_code + size) > target_code &&
                             prev_lvl <= search_lvl) {
+#pragma omp atomic write
                             wksp_flags[prev_idx] = 1;
                             violation = true;
                         }
@@ -580,6 +582,7 @@ public:
                     auto hi =
                         std::lower_bound(leaf_codes.begin(), leaf_codes.end(), nc.value + my_size);
                     for (auto it = lo; it != hi; ++it)
+#pragma omp atomic write
                         dirty_next[std::distance(leaf_codes.begin(), it)] = 1;
                 }
             }
@@ -658,6 +661,7 @@ public:
                     if (it != leaf_codes.end() && *it == target_code) {
                         size_t idx = std::distance(leaf_codes.begin(), it);
                         if (leaf_levels[idx] <= search_lvl) {
+#pragma omp atomic write
                             wksp_flags[idx] = 1;
                             violation = true;
                         }
@@ -669,6 +673,7 @@ public:
                         uint64_t size = 1ULL << (DIM * (max_level - prev_lvl));
                         if (prev_code <= target_code && (prev_code + size) > target_code &&
                             prev_lvl <= search_lvl) {
+#pragma omp atomic write
                             wksp_flags[prev_idx] = 1;
                             violation = true;
                         }

@@ -234,10 +234,13 @@ TEMPLATE_TEST_CASE("Linear Tree Invariants (Burstedde §2.2)", "[tree]", Quadtre
     SECTION("Completeness & Partition of Unity") {
         int max_lvl = 5;
         TestType tree(max_lvl);
-        std::mt19937 rng(123);
-
-        // Create a non-uniform random mesh
-        tree.refine([&](const Node& n, int) { return (n.level < 4 && (rng() % 3 == 0)); });
+        // Create a non-uniform mesh. The predicate is a hash of the cell, not a
+        // shared generator: refine() calls it from many threads at once.
+        tree.refine([&](const Node& n, int) {
+            return n.level < 4 &&
+                   ((n.code.value ^ (uint64_t(n.level) << 58)) * 0x9e3779b97f4a7c15ULL >> 40) % 3 ==
+                       0;
+        });
 
         // 1. Sortedness
         REQUIRE(std::is_sorted(tree.begin(), tree.end()));
@@ -532,9 +535,14 @@ TEMPLATE_TEST_CASE("Binary mesh+field format round-trip (mesh_io C.2)",
     // Build a non-uniform mesh.
     int max_lvl = 6;
     TestType tree(max_lvl);
-    std::mt19937_64 rng(7);
+    // A hash of the cell, not a shared generator: refine() calls the predicate
+    // from many threads at once.
     for (int i = 0; i < 4; ++i)
-        tree.refine([&](const Node& n, int) { return n.level < 5 && (rng() % 3 == 0); });
+        tree.refine([&](const Node& n, int) {
+            return n.level < 5 &&
+                   ((n.code.value ^ (uint64_t(n.level) << 58)) * 0x9e3779b97f4a7c15ULL >> 40) % 3 ==
+                       0;
+        });
 
     // Pack into a MeshData with a non-trivial bbox + two fields (f64 and f32).
     mesh_io::MeshData m;
