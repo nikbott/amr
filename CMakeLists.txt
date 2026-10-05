@@ -183,13 +183,17 @@ if(ENABLE_SANITIZERS AND NOT MSVC)
       STATUS
         "Sanitizers disabled for Profiling build to ensure accurate timing.")
   else()
-    target_compile_options(amr PRIVATE -fsanitize=address,undefined)
-    target_link_options(amr PRIVATE -fsanitize=address,undefined)
+    # UBSan only reports and carries on by default, so a test run would pass
+    # with undefined behaviour in it; make every report fatal, as ASan's are.
+    set(AMR_SANITIZE -fsanitize=address,undefined
+                     -fno-sanitize-recover=undefined)
+    target_compile_options(amr PRIVATE ${AMR_SANITIZE})
+    target_link_options(amr PRIVATE ${AMR_SANITIZE})
 
     if(BUILD_TESTING)
       foreach(t amr_tests amr_simplex_tests)
-        target_compile_options(${t} PRIVATE -fsanitize=address,undefined)
-        target_link_options(${t} PRIVATE -fsanitize=address,undefined)
+        target_compile_options(${t} PRIVATE ${AMR_SANITIZE})
+        target_link_options(${t} PRIVATE ${AMR_SANITIZE})
       endforeach()
     endif()
   endif()
