@@ -79,11 +79,15 @@ jobs:
       CXX: ${{ matrix.compiler.cxx }}
     steps:
       - uses: actions/checkout@v7
-      - name: Install toolchain (OpenMP + MPI + Catch2)
+      # No distro Catch2: its static library is built with the image's default
+      # GCC and does not link against an older libstdc++ (GCC 13 lacks
+      # __cxa_call_terminate). CMake builds the pinned Catch2 with the job's
+      # own compiler instead (CMakeLists.txt, FetchContent).
+      - name: Install toolchain (OpenMP + MPI)
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build libomp-dev \
-            openmpi-bin libopenmpi-dev catch2 ccache ${{ matrix.compiler.cxx }}
+            openmpi-bin libopenmpi-dev ccache ${{ matrix.compiler.cxx }}
       # clang needs the matching LLVM OpenMP runtime for CMake's FindOpenMP.
       # Scoped to clang jobs so this package can't break the gcc matrix entry.
       - name: Install clang OpenMP runtime
@@ -94,11 +98,13 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-${{ matrix.compiler.cxx }}-${{ matrix.build_type }}-${{ github.sha }}
           restore-keys: ccache-${{ matrix.compiler.cxx }}-${{ matrix.build_type }}-
+      # --oversubscribe: the runner may have fewer cores than the tests' ranks;
+      # Open MPI 4 and 5 both accept the flag (5 ignores the old MCA variable).
       - name: Configure (OpenMP + MPI; sanitizers on Debug)
         run: >
           cmake -B build -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DAMR_BUILD_MPI=ON -DAMR_BUILD_CUDA=OFF
+          -DAMR_BUILD_MPI=ON -DAMR_BUILD_CUDA=OFF -DMPIEXEC_PREFLAGS=--oversubscribe
           -DENABLE_SANITIZERS=${{ matrix.build_type == 'Debug' && 'ON' || 'OFF' }}
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
@@ -106,7 +112,6 @@ jobs:
       - name: Test (ctest; MPI over tcp,self to avoid the shared-mem btl hang)
         env:
           OMPI_MCA_btl: tcp,self
-          OMPI_MCA_rmaps_base_oversubscribe: "1"
         run: ctest --test-dir build --output-on-failure
       - name: Upload ctest log on failure
         if: failure()
@@ -125,8 +130,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      # The newest CUDA, with the newest GCC it accepts as host compiler (CUDA
-      # 13.3 supports GCC up to 16), for the project's GPU (A2000, sm_86).
+      # The newest CUDA, with the newest GCC it accepts as host compiler (nvcc
+      # 13.3 refuses GCC 16: "gcc versions later than 15 are not supported"),
+      # for the project's GPU (A2000, sm_86).
       - name: Install CUDA toolkit
         uses: Jimver/cuda-toolkit@v0.2.36
         with:
@@ -134,11 +140,11 @@ jobs:
           method: network
           sub-packages: '["nvcc", "cudart", "thrust"]'
       - name: Install host toolchain
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libomp-dev g++-16
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libomp-dev
       - name: Configure + compile CUDA backend (no GPU run)
         run: |
           cmake -B build-cuda -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER=g++-16 -DCMAKE_CUDA_HOST_COMPILER=g++-16 \
+            -DCMAKE_CXX_COMPILER=g++-15 -DCMAKE_CUDA_HOST_COMPILER=g++-15 \
             -DAMR_BUILD_CUDA=ON -DAMR_CUDA_ARCHITECTURES=86 -DBUILD_TESTING=ON
           cmake --build build-cuda --target amr_cuda amr_cuda_tests
 
