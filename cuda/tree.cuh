@@ -135,8 +135,8 @@ __global__ void k_mark_coarsen(const uint64_t* codes,
     if (idx >= n)
         return;
 
-    flags[idx] = 1;  // Default keep
-
+    // flags start at 1 (keep), filled before the launch: only a family's head
+    // writes its siblings' slots, so no two threads store to one slot.
     int siblings = (1 << dim);
     if (idx + siblings > n)
         return;
@@ -565,7 +565,7 @@ public:
     template <typename Oracle>
     bool coarsen(Oracle oracle) {
         int n = codes.size();
-        aux_flags.resize(n);
+        aux_flags.assign(n, 1);  // keep, unless a family head marks its family
         aux_offsets.resize(n);
 
         int grid, block;
