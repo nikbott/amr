@@ -78,10 +78,9 @@ public:
         double threshold = bandwidth_dbl + extent;
         double upper = radius_dbl + threshold;
         double lower = radius_dbl - threshold;
-        if (lower < 0)
-            lower = 0;
-
-        return (dist_sq < upper * upper && dist_sq > lower * lower);
+        // A cell whose reach covers the centre meets the band however close
+        // to the centre it is: the inner test applies only when lower > 0.
+        return dist_sq < upper * upper && (lower <= 0 || dist_sq > lower * lower);
     }
 };
 
@@ -121,10 +120,9 @@ public:
         double threshold = bandwidth_dbl + extent;
         double upper = radius_dbl + threshold;
         double lower = radius_dbl - threshold;
-        if (lower < 0)
-            lower = 0;
-
-        return (dist_sq < upper * upper && dist_sq > lower * lower);
+        // A cell whose reach covers the centre meets the band however close
+        // to the centre it is: the inner test applies only when lower > 0.
+        return dist_sq < upper * upper && (lower <= 0 || dist_sq > lower * lower);
     }
 };
 
@@ -208,12 +206,27 @@ class ScalarFieldOracle {
             std::sort(s.begin(), s.end(), std::greater<double>());
         else
             std::sort(s.begin(), s.end());
-        double acc = 0.0, cutoff = s.front();
+        double acc = 0.0;
+        if (from_top) {
+            // Dörfler: the smallest high set whose squared error reaches theta.
+            double cutoff = s.front();
+            for (double e : s) {
+                acc += e * e;
+                cutoff = e;
+                if (acc >= theta * total)
+                    break;
+            }
+            return cutoff;
+        }
+        // Coarsening: the largest low tail whose squared error stays within
+        // theta, so it stops before the element that would cross it (a large
+        // crossing element would otherwise put a crack tip's family in the band).
+        double cutoff = -std::numeric_limits<double>::infinity();
         for (double e : s) {
             acc += e * e;
-            cutoff = e;
-            if (acc >= theta * total)
+            if (acc > theta * total)
                 break;
+            cutoff = e;
         }
         return cutoff;
     }
@@ -235,7 +248,8 @@ public:
             throw std::invalid_argument("ScalarFieldOracle: codes/levels/error size mismatch");
         if (!std::is_sorted(codes_.begin(), codes_.end()))
             throw std::invalid_argument("ScalarFieldOracle: codes must be Morton-sorted");
-        if (theta_refine < 0.0 || theta_refine > 1.0 || theta_coarsen < 0.0 || theta_coarsen > 1.0)
+        if (!(theta_refine >= 0.0 && theta_refine <= 1.0) ||
+            !(theta_coarsen >= 0.0 && theta_coarsen <= 1.0))  // NaN fails too
             throw std::invalid_argument("ScalarFieldOracle: theta must be in [0, 1]");
         if (coarse_level_ > fine_level_)
             throw std::invalid_argument(
