@@ -329,10 +329,22 @@ TEST_CASE("Invalid input is rejected", "[simplex]") {
         {2, {0, 1}, {std::nan(""), 0.5}},
         {2, {0, 0}, {0.5, 0.5}},  // a repeated parent
         {2, {2, 0}, {0.5, 0.5}},  // its own parent
-        {2, {0, 1, 0, 1, 0, 1, 0, 1, 0}, std::vector<double>(9, 1.0 / 9)}};
+        {2, {0, 1, 0, 1, 0, 1, 0, 1, 0}, std::vector<double>(9, 1.0 / 9)},
+        {2, {0}, {1.0}},           // one parent: a duplicate node, not a constraint
+        {2, {0, 1}, {0.5, 0.5}}};  // not at its parents' mean (node 2 is a vertex at (0,1))
     for (const auto& row : bad_rows) {
         bad = m;
         bad.hn = {row};
         rejects(bad);
     }
+    // A node at its parents' mean is accepted, but only once.
+    Mesh mid = m;
+    mid.pos.push_back({0.5, 0.5, 0});
+    mid.hn = {{3, {1, 2}, {0.5, 0.5}}};
+    CHECK_NOTHROW(refine(mid, std::vector<Index>{0}));
+    mid.hn.push_back(mid.hn.front());
+    rejects(mid);
+    mid.hn = {{3, {1, 2}, {0.5, 0.5}}};
+    mid.pos[3] = {7, 7, 0};  // listed as the midpoint of 1-2, but elsewhere
+    rejects(mid);
 }

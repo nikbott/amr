@@ -95,13 +95,14 @@ struct Refinement {
 
 namespace detail {
 
-/// Items grouped by an integer key, in compressed-row form.
+/// Items grouped by an integer key, in compressed-row form. Offsets are
+/// size_t: connectivity, and so the items, can exceed 2^31 entries.
 struct Csr {
-    std::vector<Index> start;  ///< size n_keys + 1
+    std::vector<std::size_t> start;  ///< size n_keys + 1
     std::vector<Index> items;
     [[nodiscard]] std::span<const Index> of(Index key) const {
-        const auto b = static_cast<std::size_t>(start[static_cast<std::size_t>(key)]);
-        const auto e = static_cast<std::size_t>(start[static_cast<std::size_t>(key) + 1]);
+        const auto b = start[static_cast<std::size_t>(key)];
+        const auto e = start[static_cast<std::size_t>(key) + 1];
         return {items.data() + b, e - b};
     }
 };
@@ -116,10 +117,9 @@ Csr make_csr(std::size_t n_keys, std::size_t n_items, KeyOf key_of, ValueOf valu
     for (std::size_t k = 1; k <= n_keys; ++k)
         csr.start[k] += csr.start[k - 1];
     csr.items.resize(n_items);
-    std::vector<Index> next(csr.start.begin(), csr.start.end() - 1);
+    std::vector<std::size_t> next(csr.start.begin(), csr.start.end() - 1);
     for (std::size_t i = 0; i < n_items; ++i)
-        csr.items[static_cast<std::size_t>(next[static_cast<std::size_t>(key_of(i))]++)] =
-            value_of(i);
+        csr.items[next[static_cast<std::size_t>(key_of(i))]++] = value_of(i);
     return csr;
 }
 
@@ -177,11 +177,12 @@ inline void validate(const Mesh& m) {
     if (!std::all_of(m.con.begin(), m.con.end(), in_range))
         throw std::out_of_range("simplex: element vertex out of range");
     NodeKey sorted;
+    std::vector<char> constrained(m.pos.size(), 0);
     for (const auto& h : m.hn) {
-        if (h.parent.empty() || h.parent.size() > sorted.size() ||
+        if (h.parent.size() < 2 || h.parent.size() > sorted.size() ||
             h.parent.size() != h.weight.size())
             throw std::invalid_argument(
-                "simplex: a constraint needs 1 to 8 parents, with one weight each");
+                "simplex: a constraint needs 2 to 8 parents, with one weight each");
         if (!in_range(h.node) || !std::all_of(h.parent.begin(), h.parent.end(), in_range))
             throw std::out_of_range("simplex: constraint node out of range");
         const auto end = std::copy(h.parent.begin(), h.parent.end(), sorted.begin());
@@ -194,6 +195,21 @@ inline void validate(const Mesh& m) {
             sum += w;
         if (!(std::abs(sum - 1.0) <= 1e-12))  // also rejects non-finite weights
             throw std::invalid_argument("simplex: constraint weights must sum to 1");
+        if (constrained[static_cast<std::size_t>(h.node)]++)
+            throw std::invalid_argument("simplex: a node is constrained twice");
+        // The node must sit where its parents' refinement puts it: refine()
+        // reuses it for that lattice point and builds children on it.
+        const auto x = [&m](Index v) { return m.pos[static_cast<std::size_t>(v)]; };
+        for (std::size_t c = 0; c < 3; ++c) {
+            double mean = 0.0, scale = 1.0;
+            for (std::size_t k = 0; k < h.parent.size(); ++k) {
+                mean += h.weight[k] * x(h.parent[k])[c];
+                scale = std::max(scale, std::abs(x(h.parent[k])[c]));
+            }
+            if (!(std::abs(x(h.node)[c] - mean) <= 1e-9 * scale))
+                throw std::invalid_argument(
+                    "simplex: a hanging node is not at its parents' weighted mean");
+        }
     }
 }
 
