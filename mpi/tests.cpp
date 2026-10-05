@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <random>
 #include <vector>
@@ -437,7 +438,19 @@ TEST_CASE("Safety & Edge Cases", "[safety]") {
 
 int main(int argc, char* argv[]) {
     MPI_Init(&argc, &argv);
-    int result = Catch::Session().run(argc, argv);
+    // Every test case makes collective calls, so every rank must run the same
+    // cases in the same order. Catch2 3.16 orders them randomly with a seed of
+    // its own per process; declare the order (an explicit --order still wins)
+    // and give every rank rank 0's seed.
+    Catch::Session session;
+    session.configData().runOrder = Catch::TestRunOrder::Declared;
+    int result = session.applyCommandLine(argc, argv);
+    if (result == 0) {
+        std::uint32_t seed = session.configData().rngSeed;
+        MPI_Bcast(&seed, 1, MPI_UINT32_T, 0, MPI_COMM_WORLD);
+        session.configData().rngSeed = seed;
+        result = session.run();
+    }
     MPI_Finalize();
     return result;
 }

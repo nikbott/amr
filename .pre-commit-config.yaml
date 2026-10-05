@@ -4,7 +4,7 @@
 ---
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -16,7 +16,7 @@ repos:
         args: ["--fix=lf"]
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v18.1.8
+    rev: v22.1.8
     hooks:
       - id: clang-format
         files: '\.(cpp|hpp|cu|cuh|h|cc)$'
@@ -27,7 +27,7 @@ repos:
       - id: cmake-format
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
+    rev: v2.4.3
     hooks:
       - id: codespell
         # Skip the generated notebook and the Portuguese implementation walkthrough.
@@ -35,6 +35,13 @@ repos:
         # Only false positives that actually occur: numer ("Numer." journal
         # abbrev), sequencial (Portuguese plot label), socio-economic (CoC text).
         args: ["--ignore-words-list=numer,sequencial,socio-economic"]
+
+  # GitHub Actions workflows are code too: actionlint checks their syntax,
+  # expressions and runner labels (configured in .github/actionlint.yaml).
+  - repo: https://github.com/Mateusz-Grzelinski/actionlint-py
+    rev: v1.7.12.25
+    hooks:
+      - id: actionlint
 
   # Local hook — never commit perf.data, SVGs, or binaries from cuda/.
   # These are build artifacts; .gitignore is the primary defense, this is the backstop.

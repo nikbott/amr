@@ -1,0 +1,5 @@
+# Runner labels actionlint does not know.
+self-hosted-runner:
+  labels:
+    - gpu            # the project's self-hosted A2000 runner (ci.yml, job `gpu`)
+    - ubuntu-26.04   # GitHub-hosted, GA since 2026-09; newer than actionlint 1.7.12

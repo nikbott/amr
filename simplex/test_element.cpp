@@ -525,9 +525,11 @@ TEST_CASE("Edges and faces are those of the convex reference element", "[element
             for (const auto& f : faces)
                 for (int a : f)
                     for (int b : f)
-                        if (a < b && std::count_if(faces.begin(), faces.end(), [&](const auto& g) {
-                                         return g.contains(a) && g.contains(b);
-                                     }) == 2)
+                        if (a < b &&
+                            std::count_if(
+                                faces.begin(),
+                                faces.end(),
+                                [&](const auto& g) { return g.contains(a) && g.contains(b); }) == 2)
                             edges.insert({a, b});
             CHECK(n - static_cast<int>(edges.size()) + static_cast<int>(faces.size()) ==
                   2);  // Euler
