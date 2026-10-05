@@ -273,7 +273,7 @@ void run_test_invariants() {
         code = morton::encode_3d(center, center, center);
 
     int dir[3] = {1, 0, 0};
-    uint64_t n_code_val = get_neighbor_code<DIM>(code.value, 2, 5, dir);
+    uint64_t n_code_val = morton::neighbor_code<DIM>(code.value, 2, 5, dir);
 
     CHECK(n_code_val != UINT64_MAX);
 

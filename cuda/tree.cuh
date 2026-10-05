@@ -76,69 +76,6 @@ HOST_DEVICE int device_lower_bound(const T* data, int n, T val) {
     return l;
 }
 
-template <int DIM>
-HOST_DEVICE uint64_t get_neighbor_code(uint64_t code, int level, int max_level, const int* dir) {
-    uint64_t mask_x, mask_y, mask_z;
-    if (DIM == 3) {
-        mask_x = morton::MASK3_X;
-        mask_y = morton::MASK3_Y;
-        mask_z = morton::MASK3_Z;
-    } else {
-        mask_x = morton::MASK2_X;
-        mask_y = morton::MASK2_Y;
-        mask_z = 0;
-    }
-
-    auto add_dim = [&](uint64_t c, uint64_t mask, int d) -> uint64_t {
-        if (c == UINT64_MAX)
-            return UINT64_MAX;
-        if (d == 0)
-            return c;
-        // A level-0 cell spans the whole domain: any neighbour is out of bounds,
-        // and returning here avoids the 1<<64 shift below at the maximum level.
-        if (level == 0)
-            return UINT64_MAX;
-
-        uint64_t shift = max_level - level;
-        uint64_t one;
-        if (DIM == 2)
-            one = 1ULL << (shift * 2);
-        else
-            one = 1ULL << (shift * 3);
-
-        if (mask == mask_y)
-            one <<= 1;
-        if (mask == mask_z)
-            one <<= 2;
-
-        if (d > 0) {
-            // Out of the domain iff this axis already sits at its maximum aligned
-            // coordinate for this level. (The old all-ones test only fired at full
-            // resolution, so a coarser boundary cell's +neighbour wrapped instead
-            // of returning the sentinel.)
-            const uint64_t domain_mask =
-                (DIM * max_level >= 64) ? ~0ULL : ((1ULL << (DIM * max_level)) - 1);
-            const uint64_t axis_max = (mask & domain_mask) & ~(one - 1);
-            if ((c & mask) == axis_max)
-                return UINT64_MAX;
-            uint64_t sum = (c | ~mask) + one;
-            return (sum & mask) | (c & ~mask);
-        } else {
-            if ((c & mask) < one)
-                return UINT64_MAX;
-            uint64_t diff = (c & mask) - one;
-            return (diff & mask) | (c & ~mask);
-        }
-    };
-
-    uint64_t next = code;
-    next = add_dim(next, mask_x, dir[0]);
-    next = add_dim(next, mask_y, dir[1]);
-    if (DIM == 3)
-        next = add_dim(next, mask_z, dir[2]);
-    return next;
-}
-
 // --- Refinement Kernels ---
 
 template <typename Oracle>
@@ -296,7 +233,7 @@ __global__ void k_check_balance(const uint64_t* codes,
     int num_dirs = (DIM == 2) ? 4 : 18;
 
     for (int d = 0; d < num_dirs; ++d) {
-        uint64_t n_code = get_neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
+        uint64_t n_code = morton::neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
         if (n_code == UINT64_MAX)
             continue;
 
@@ -394,7 +331,7 @@ __global__ void k_check_balance_active(const uint64_t* codes,
     int num_dirs = (DIM == 2) ? 4 : 18;
 
     for (int d = 0; d < num_dirs; ++d) {
-        uint64_t n_code = get_neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
+        uint64_t n_code = morton::neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
         if (n_code == UINT64_MAX)
             continue;
 
@@ -492,7 +429,7 @@ __global__ void k_mark_child_neighbors(const uint64_t* codes,
     int num_dirs = (DIM == 2) ? 4 : 18;
 
     for (int d = 0; d < num_dirs; ++d) {
-        uint64_t n_code = get_neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
+        uint64_t n_code = morton::neighbor_code<DIM>(my_code, my_lvl, max_level, dirs[d]);
         if (n_code == UINT64_MAX)
             continue;
 
@@ -545,14 +482,10 @@ public:
     }
 
     void validate_config() const {
-        if constexpr (DIM == 3) {
-            if (max_level > 21)
-                throw std::runtime_error(
-                    "Safety Violation: 3D Max Level > 21 is unsafe for 64-bit Morton codes.");
-        } else {
-            if (max_level > 32)
-                throw std::runtime_error("Safety Violation: 2D Max Level > 32 is unsafe.");
-        }
+        if (max_level < 0 || max_level > morton::max_level_limit(DIM))
+            throw std::runtime_error("Safety Violation: max_level must be in [0, " +
+                                     std::to_string(morton::max_level_limit(DIM)) +
+                                     "] for 64-bit Morton codes.");
     }
 
     size_t size() const { return codes.size(); }
