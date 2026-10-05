@@ -395,6 +395,28 @@ TEMPLATE_TEST_CASE("2:1 Balance & Ripple Algorithm (Holke §3.3)",
         REQUIRE(violations == 0);
     }
 
+    SECTION("Balance with empty ranks") {
+        // Before any repartition every leaf is on rank 0 and the other ranks
+        // own none; balance must still run there (it used to read the empty
+        // scan's back() on those ranks).
+        int max_lvl = 6;
+        TestType tree(max_lvl);
+        auto center_oracle = [&](const Node& n, int) {
+            auto coords = tree.decode(n.code);
+            uint64_t size = 1ULL << (max_lvl - n.level);
+            uint64_t mid = tree.domain_width() / 2;
+            for (int k = 0; k < DIM; ++k)
+                if (!(coords[k].value <= mid && coords[k].value + size > mid))
+                    return false;
+            return n.level < max_lvl;
+        };
+        while (tree.refine(center_oracle))
+            ;
+        tree.balance();
+        tree.verify_global();
+        REQUIRE(count_balance_violations(tree) == 0);
+    }
+
     SECTION("Random Cloud Stress Test") {
         // Same sparse hash-based cloud as the omp suite, where the fixture is
         // checked to start unbalanced (omp/test_util.hpp, check_balance_properties).

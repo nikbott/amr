@@ -730,6 +730,9 @@ private:
 
     void apply_refinement_from_flags() {
         size_t n = leaf_codes.size();
+        if (n == 0)
+            return;  // a rank with no leaves has nothing to refine (and an empty scan has no
+                     // back())
         wksp_counts.resize(n);
         wksp_offsets.resize(n);
 #pragma omp parallel for
