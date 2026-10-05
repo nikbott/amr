@@ -19,15 +19,23 @@
 
 namespace amr {
 
-// Downcast a byte count to the int the MPI count/displacement APIs require,
-// throwing rather than silently wrapping negative when a single message exceeds
-// 2 GB (INT_MAX) -- reachable only at billion-leaf scale, but a wrap there would
-// corrupt the transfer silently.
-inline int mpi_byte_count(std::size_t bytes) {
-    if (bytes > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+// The byte counts of one exchange as the int counts and displacements MPI
+// takes. Each count and their total must fit in an int; the check is agreed
+// across ranks, so either every rank proceeds or every rank throws (a throw on
+// one rank alone would leave the others waiting in the next collective).
+template <typename Bytes>
+std::vector<int> mpi_counts(const Bytes& bytes) {
+    std::size_t total = 0;
+    for (auto b : bytes)
+        total += static_cast<std::size_t>(b);
+    if (mpi::all_reduce_or(total > static_cast<std::size_t>(std::numeric_limits<int>::max())))
         throw std::runtime_error(
-            "mpi: message exceeds INT_MAX bytes (2 GB); chunking not implemented");
-    return static_cast<int>(bytes);
+            "mpi: an exchange exceeds INT_MAX bytes (2 GB) on some rank; chunking not implemented");
+    std::vector<int> counts;
+    counts.reserve(bytes.size());
+    for (auto b : bytes)
+        counts.push_back(static_cast<int>(b));
+    return counts;
 }
 
 struct Node {
@@ -350,6 +358,8 @@ public:
         size_t n_global = global_size();
         size_t offset_global = 0;
         MPI_Exscan(&n_local, &offset_global, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+        if (mpi_rank == 0)
+            offset_global = 0;  // MPI leaves rank 0's Exscan result undefined
 
         // 2. Determine Target Ranges
         // Rank i owns global indices [start, end)
@@ -394,17 +404,16 @@ public:
 
         // 4. Exchange Data (Reuse existing pattern)
         auto exchange_vec = [&](auto& sends, auto& recvs) {
-            std::vector<int> sc(mpi_size), rc(mpi_size), sdisp(mpi_size + 1), rdisp(mpi_size + 1);
-
-            // Downcast to int for MPI counts; throws past INT_MAX (2 GB/message).
+            using V = typename std::remove_reference_t<decltype(sends[0])>::value_type;
+            std::vector<std::size_t> bytes(mpi_size);
             for (int i = 0; i < mpi_size; ++i)
-                sc[i] = mpi_byte_count(
-                    sends[i].size() *
-                    sizeof(typename std::remove_reference_t<decltype(sends[0])>::value_type));
-
+                bytes[i] = sends[i].size() * sizeof(V);
+            std::vector<int> sc = mpi_counts(bytes), rc(mpi_size);
             MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT, MPI_COMM_WORLD);
+            mpi_counts(rc);  // the total received must fit too
+            std::vector<int> sdisp(mpi_size + 1), rdisp(mpi_size + 1);
             for (int i = 0; i < mpi_size; ++i) {
-                sdisp[i + 1] = sdisp[i] + sc[i];
+                sdisp[i + 1] = sdisp[i] + sc[i];  // within the checked totals
                 rdisp[i + 1] = rdisp[i] + rc[i];
             }
 
@@ -584,10 +593,12 @@ private:
         // 1. Per-rank send counts (bytes) and the reciprocal recv counts. This
         //    counts exchange is one int per rank (cheap) and simultaneously
         //    reveals the source neighbour set -- exactly as before.
-        std::vector<int> sc(mpi_size), rc(mpi_size);
+        std::vector<std::size_t> bytes(mpi_size);
         for (int i = 0; i < mpi_size; ++i)
-            sc[i] = mpi_byte_count(sends[i].size() * sizeof(T));
+            bytes[i] = sends[i].size() * sizeof(T);
+        std::vector<int> sc = mpi_counts(bytes), rc(mpi_size);
         MPI_Alltoall(sc.data(), 1, MPI_INT, rc.data(), 1, MPI_INT, MPI_COMM_WORLD);
+        mpi_counts(rc);  // the total received must fit too, so the offsets below cannot wrap
 
         // 2. Neighbour sets: destinations (I send to) and sources (I recv from).
         std::vector<int> dests, srcs;
