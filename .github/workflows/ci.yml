@@ -5,6 +5,8 @@ on:
     branches: [main, dev]
   pull_request:
   workflow_dispatch:
+  # The release workflow runs this whole pipeline as its gate.
+  workflow_call:
 
 # Cancel superseded runs on the same ref (don't waste runners on stale pushes).
 concurrency:
@@ -138,6 +140,23 @@ jobs:
             -DAMR_BUILD_CUDA=ON -DAMR_CUDA_ARCHITECTURES=70 -DBUILD_TESTING=ON
           cmake --build build-cuda --target amr_cuda amr_cuda_tests
 
+  # ------------------------------------------------------------ ci-ok ---------
+  # The one check branch protection requires: it passes only when every job
+  # above passed, so renaming or adding matrix entries never leaves protection
+  # waiting on a check that no longer runs. Add a new required job to `needs`.
+  ci-ok:
+    if: always()
+    needs: [lint, cpu, cuda-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to have passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+
   # ------------------------------------------- GPU runtime (self-hosted) -------
   # Opt-in: manual `workflow_dispatch` only, run when the self-hosted GPU runner
   # (the project's A2000, `gpu` label) is online. Deliberately NOT triggered on
@@ -145,7 +164,9 @@ jobs:
   # and stalls the whole run, so GPU runtime validation is on-demand instead.
   gpu:
     needs: cuda-build
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    # CI's own manual run only: as the release gate (workflow_call) the event is
+    # the caller's, which may also be workflow_dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.workflow == 'CI' }}
     runs-on: [self-hosted, linux, gpu]
     timeout-minutes: 30
     steps:
