@@ -78,7 +78,7 @@ mpirun -np 4 ./build/amr_mpi
 ### CUDA (`cuda/`)
 
 ```bash
-# set the arch to your GPU (default sm_70 → AMR_CUDA_ARCHITECTURES=70):
+# set the arch to your GPU (default sm_86 → AMR_CUDA_ARCHITECTURES=86):
 cmake -S . -B build -DAMR_BUILD_CUDA=ON -DAMR_CUDA_ARCHITECTURES=80 && cmake --build build
 ./build/amr_cuda   # needs a working CUDA driver matching the runtime
 ```

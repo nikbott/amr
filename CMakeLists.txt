@@ -51,8 +51,10 @@ option(WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 # Backend feature flags. OpenMP (omp/) always builds; MPI and CUDA are opt-in.
 option(AMR_BUILD_MPI "Build the distributed MPI backend (mpi/)" OFF)
 option(AMR_BUILD_CUDA "Build the single-GPU CUDA backend (cuda/)" OFF)
+# The default is the project's GPU, an RTX A2000 (sm_86); CUDA 13 dropped
+# architectures below 75.
 set(AMR_CUDA_ARCHITECTURES
-    "70"
+    "86"
     CACHE STRING
           "CUDA arch(es) for the cuda/ backend, e.g. 80 (A100), 90 (H100)")
 
