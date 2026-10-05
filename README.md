@@ -36,7 +36,8 @@ Freudenthal's subdivision ([Freudenthal1942], [Bey2000]; the tetrahedron's
 diagonal as in [Bey1995], [Zhang1995]), plus a hand-made pyramid. Any mix of
 one dimension's shapes stays conforming. On the solver's triangle and
 tetrahedron meshes it reproduces the MATLAB meshes exactly.
-Tests: Catch2 (`simplex/test*.cpp`), built by CMake as `amr_simplex_tests`.
+Tests: Catch2 (`simplex/test*.cpp`), built by CMake as `amr_simplex_tests`;
+`amr_simplex_bench` times one solver cycle on growing meshes.
 `amr_simplex {refine|balance|adapt|structured} IN OUT` runs it on SMX2 files
 (`simplex/io.hpp`), the exchange format MATLAB drives it through.
 
