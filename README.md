@@ -17,7 +17,7 @@ in its own directory:
 
 | Dir       | Backend            | Parallelism            | Build            | Tests                          |
 |-----------|--------------------|------------------------|------------------|--------------------------------|
-| `omp/`    | shared-memory C++  | OpenMP                 | CMake or `g++`             | Catch2 (`omp/tests.cpp`)       |
+| `omp/`    | shared-memory C++  | OpenMP                 | CMake or `g++`             | Catch2 (`omp/test_*.cpp`)      |
 | `mpi/`    | distributed C++    | MPI (+OpenMP per rank) | CMake (`-DAMR_BUILD_MPI=ON`)  | Catch2 (`mpi/tests.cpp`)       |
 | `cuda/`   | single-GPU         | CUDA + Thrust          | CMake (`-DAMR_BUILD_CUDA=ON`) | custom harness (`cuda/tests.cu`)|
 
@@ -59,7 +59,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
 ctest --test-dir build
 
 # Or directly against system Catch2, no network:
-g++ -std=c++20 -O2 -fopenmp -Iomp omp/tests.cpp \
+g++ -std=c++20 -O2 -fopenmp -Iomp omp/test_*.cpp \
     /usr/lib/libCatch2Main.a /usr/lib/libCatch2.a -o omp/test && omp/test
 OMP_NUM_THREADS=8 g++ -std=c++20 -O2 -fopenmp -Iomp omp/main.cpp -o omp/amr && omp/amr
 ```

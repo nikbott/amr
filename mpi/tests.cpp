@@ -397,7 +397,7 @@ TEMPLATE_TEST_CASE("2:1 Balance & Ripple Algorithm (Holke §3.3)",
 
     SECTION("Random Cloud Stress Test") {
         // Same sparse hash-based cloud as the omp suite, where the fixture is
-        // checked to start unbalanced (omp/tests.cpp, check_balance_properties).
+        // checked to start unbalanced (omp/test_util.hpp, check_balance_properties).
         TestType tree(8);
         auto cloud_oracle = [&](const Node& n, int) {
             if (n.level >= 6)

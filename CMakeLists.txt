@@ -135,7 +135,9 @@ target_link_libraries(amr_gallery PRIVATE core)
 
 # --- Executable: Tests --------------------------------------------------------
 if(BUILD_TESTING)
-  add_executable(amr_tests omp/tests.cpp)
+  add_executable(
+    amr_tests omp/test_core.cpp omp/test_tree.cpp omp/test_mesh_io.cpp
+              omp/test_oracle.cpp omp/test_viz.cpp)
   target_link_libraries(amr_tests PRIVATE core Catch2::Catch2WithMain)
   add_test(NAME AllTests COMMAND amr_tests)
 endif()

@@ -37,7 +37,7 @@ class, no registration. See `omp/physics.hpp` for the built-in `CircleOracle`
    something, so drive it in a loop (`while (tree.refine(MyOracle{cfg})) {}`) to
    refine to convergence.
 
-3. **Test it** — add a Catch2 case in `omp/tests.cpp` asserting the expected
+3. **Test it** — add a Catch2 case in `omp/test_oracle.cpp` asserting the expected
    leaf set / invariants on a small fixture.
 
 Keep oracles pure and cheap: they run once per leaf per refinement pass. To
