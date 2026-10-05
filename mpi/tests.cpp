@@ -224,10 +224,13 @@ TEMPLATE_TEST_CASE("Linear Tree Invariants (Burstedde §2.2)",
     SECTION("Completeness & Partition of Unity") {
         int max_lvl = 5;
         TestType tree(max_lvl);
-        std::mt19937 rng(123);  // Same seed
-
-        // Create a non-uniform random mesh
-        tree.refine([&](const Node& n, int) { return (n.level < 4 && (rng() % 3 == 0)); });
+        // The same non-uniform mesh as the omp suite: a hash of the cell, not a
+        // shared generator, since refine() calls the predicate from many threads.
+        tree.refine([&](const Node& n, int) {
+            return n.level < 4 &&
+                   ((n.code.value ^ (uint64_t(n.level) << 58)) * 0x9e3779b97f4a7c15ULL >> 40) % 3 ==
+                       0;
+        });
 
         tree.repartition();
 

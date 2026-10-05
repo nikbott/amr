@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <random>
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -28,9 +27,14 @@ TEMPLATE_TEST_CASE("Binary mesh+field format round-trip (mesh_io C.2)",
     // Build a non-uniform mesh.
     int max_lvl = 6;
     TestType tree(max_lvl);
-    std::mt19937_64 rng(7);
+    // A hash of the cell, not a shared generator: refine() calls the predicate
+    // from many threads at once.
     for (int i = 0; i < 4; ++i)
-        tree.refine([&](const Node& n, int) { return n.level < 5 && (rng() % 3 == 0); });
+        tree.refine([&](const Node& n, int) {
+            return n.level < 5 &&
+                   ((n.code.value ^ (uint64_t(n.level) << 58)) * 0x9e3779b97f4a7c15ULL >> 40) % 3 ==
+                       0;
+        });
 
     // Pack into a MeshData with a non-trivial bbox + two fields (f64 and f32).
     mesh_io::MeshData m;
